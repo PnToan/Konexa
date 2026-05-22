@@ -208,9 +208,22 @@ function getWallDimInputInfo(dimKey) {
   const rightTop = localToScreen(viewport, rect.x + rect.width, rect.y + rect.height)
   const leftBottom = localToScreen(viewport, rect.x, rect.y)
 
+  const viewKey = app.state.currentView
+
+  let wallKey = dimKey
+
+  if (viewKey === 'top' || viewKey === 'bottom') {
+    wallKey = dimKey === 'width' ? 'width' : 'depth'
+  } else if (viewKey === 'front' || viewKey === 'back') {
+    wallKey = dimKey === 'width' ? 'width' : 'height'
+  } else if (viewKey === 'left' || viewKey === 'right') {
+    wallKey = dimKey === 'width' ? 'depth' : 'height'
+  }
+
   if (dimKey === 'width') {
     return {
-      key: 'width',
+      key: wallKey,
+      editKey: 'width',
       value: String(Math.round(rect.width)),
       x: (leftTop.x + rightTop.x) / 2,
       y: leftTop.y - 46
@@ -219,7 +232,8 @@ function getWallDimInputInfo(dimKey) {
 
   if (dimKey === 'height') {
     return {
-      key: 'height',
+      key: wallKey,
+      editKey: 'height',
       value: String(Math.round(rect.height)),
       x: leftTop.x - 58,
       y: (leftTop.y + leftBottom.y) / 2
@@ -243,7 +257,7 @@ function openDimInput(dimKey) {
     value: info.value
   }
 
-  wall.setEditingDim(info.key)
+  wall.setEditingDim(info.editKey)
   app.clearCommand()
   app.setStatus(`Nhập kích thước Wall: ${info.key}`)
 
@@ -306,8 +320,12 @@ function onPointerDown(event) {
     event.clientY - canvasRect.top
   )
 
-  if (dimHit || hoverDim.value) {
-    openDimInput(dimHit || hoverDim.value)
+  const activeDimHit = dimHit || hoverDim.value
+
+  if (activeDimHit) {
+    event.preventDefault()
+    event.stopPropagation()
+    openDimInput(activeDimHit)
     return
   }
 
