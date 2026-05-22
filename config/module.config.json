@@ -1,0 +1,16 @@
+{
+  "modules": [
+    {
+      "id": "MN_Drawing",
+      "enabled": true
+    },
+    {
+      "id": "MN_Cad",
+      "enabled": true
+    },
+    {
+      "id": "MN_Gcode",
+      "enabled": true
+    }
+  ]
+}
