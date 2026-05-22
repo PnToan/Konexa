@@ -1,7 +1,16 @@
 <template>
   <main class="mn-canvas-area" ref="viewportRef" tabindex="0" @keydown="onKeyDown">
-    <canvas ref="canvasRef" class="mn-draw-canvas"
-      @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerUp" @wheel.prevent="onWheel" @contextmenu.prevent />
+    <canvas
+      ref="canvasRef"
+      class="mn-draw-canvas"
+      :class="canvasCursorClass"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointerleave="onPointerUp"
+      @wheel.prevent="onWheel"
+      @contextmenu.prevent
+    />
     <Mini3DPreview v-if="app.state.mini3DVisible" />
     <div class="mn-quick-view-bar">
       <button v-for="view in views" :key="view.id" class="mn-quick-view-btn" :class="{ active: app.state.currentView === view.id }" @click="app.setView(view.id)">{{ view.label }}</button>
@@ -11,7 +20,7 @@
       <div class="mn-joystick-outer"><div class="mn-joystick-inner"><span class="mn-joystick-label">3D</span></div></div>
     </div>
     <div class="mn-viewport-info">
-      Tool: {{ app.activeToolLabel }} | X: {{ localX }} | Y: {{ localY }} | Zoom: {{ zoomLabel }}
+      Tool: {{ app.getActiveToolLabel() }} | Mặt: {{ app.getActiveViewLabel() }} ({{ app.getActiveViewAxesText() }}) | {{ axisHorizontal }}: {{ localX }} | {{ axisVertical }}: {{ localY }} | Zoom: {{ zoomLabel }}
     </div>
   </main>
 </template>
@@ -21,14 +30,17 @@ import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import Mini3DPreview from '../preview/Mini3DPreview.vue'
 import { useAppStore } from '../../stores/useAppStore'
 import { useCabinetStore } from '../../stores/useCabinetStore'
+import { useWallStore } from '../../stores/useWallStore'
 import { useDrawingStore } from '../../stores/useDrawingStore'
-import { renderCanvas2D } from '../../renderers/canvas-2d-renderer'
+import { renderCanvas2D, getWallDimHit } from '../../renderers/canvas-2d-renderer'
 import { screenToLocal } from '../../renderers/viewport-transform'
-import { hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
+import { projectBoxToCameraRect, cameraLocalToWorldPoint } from '../../core/view/view-camera'
+import { createMoveSnapResult, getPanelSnapPoints, hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
 import { handleViewportKey } from '../../commands/keyboard-controller'
 
 const app = useAppStore()
 const cabinet = useCabinetStore()
+const wall = useWallStore()
 const drawing = useDrawingStore()
 const viewportRef = ref(null)
 const canvasRef = ref(null)
@@ -45,7 +57,28 @@ const views = [
 const zoomLabel = computed(() => `${Math.round(app.state.viewport.zoom * 100)}%`)
 const localX = computed(() => Math.round(app.state.mouse.localX))
 const localY = computed(() => Math.round(app.state.mouse.localY))
+const activeViewConfig = computed(() => app.getViewConfig(app.state.currentView))
+const axisHorizontal = computed(() => activeViewConfig.value.axisA || 'X')
+const axisVertical = computed(() => activeViewConfig.value.axisB || 'Y')
+//=================
+function getWallBox3D() {
+  return {
+    id: 'wall_main',
+    x: wall.state.x,
+    y: wall.state.y,
+    z: wall.state.z,
+    width: wall.state.width,
+    depth: wall.state.depth,
+    height: wall.state.height
+  }
+} // End getWallBox3D
+const canvasCursorClass = computed(() => {
+  if (app.state.currentTool === 'move') return 'mn-cursor-move'
+  if (app.state.currentTool === 'panel') return 'mn-cursor-crosshair'
+  if (app.state.currentTool === 'select') return 'mn-cursor-select'
 
+  return 'mn-cursor-default'
+})
 function resizeCanvas() {
   const canvas = canvasRef.value
   const host = viewportRef.value
@@ -62,42 +95,118 @@ function resizeCanvas() {
   draw()
 }
 
+//=================
 function draw() {
   if (!ctx || !canvasRef.value) return
+
   const viewport = app.state.viewport
+  const wallRect = projectBoxToCameraRect(getWallBox3D(), app.state.currentView)
+
   renderCanvas2D(ctx, {
     width: viewport.width,
     height: viewport.height,
     viewport,
+    wallRect,
+    wallEditingDim: wall.state.editingDim,
     cabinetRect: cabinet.cabinetRect2D(),
     zones: drawing.state.zones,
     panels: drawing.state.panels,
     hover: drawing.state.hover,
+    snapPreview: drawing.state.snapPreview,
     selectedPanelId: drawing.state.selectedPanelId,
     showGrid: app.state.showGrid
   })
-}
+} // End draw
 
+//=================
 function localFromEvent(event) {
   const rect = canvasRef.value.getBoundingClientRect()
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
-  const local = screenToLocal(app.state.viewport, x, y)
-  app.setMouse({ x, y, localX: local.x, localY: local.y })
-  return local
-}
+
+  const cameraLocal = screenToLocal(app.state.viewport, x, y)
+  const worldPoint = cameraLocalToWorldPoint(cameraLocal, app.state.currentView)
+
+  app.setMouse({
+    x,
+    y,
+    localX: cameraLocal.x,
+    localY: cameraLocal.y,
+    worldX: worldPoint.x,
+    worldY: worldPoint.y,
+    worldZ: worldPoint.z
+  })
+
+  return cameraLocal
+} // End localFromEvent
+//=================
+function hitTestMoveGrip(local) {
+  const tolerance = 14 / (app.state.viewport.localScale * app.state.viewport.zoom)
+  const hoverPanel = drawing.state.hover?.type === 'panel' ? drawing.state.hover.panel : null
+
+  if (!hoverPanel) return null
+
+  const gripPoints = getPanelSnapPoints(hoverPanel).filter((snapPoint) => snapPoint.type === 'corner')
+
+  for (const gripPoint of gripPoints) {
+    const dx = local.x - gripPoint.x
+    const dy = local.y - gripPoint.y
+    const distance = Math.sqrt(dx * dx + dy * dy)
+
+    if (distance <= tolerance) {
+      return {
+        panel: hoverPanel,
+        gripPoint
+      }
+    }
+  }
+
+  return null
+} // End hitTestMoveGrip
+//=================
 
 function updateHover(local) {
-  const tolerance = 12 / (app.state.viewport.localScale * app.state.viewport.zoom)
-  const panelHit = hitTestPanel(drawing.state.panels, local)
-  const edgeHit = hitTestZoneEdge(drawing.state.zones, local, tolerance)
-  if (app.state.currentTool === 'panel') drawing.setHover(edgeHit)
-  else drawing.setHover(panelHit || edgeHit)
-}
+  const scale = app.state.viewport.localScale * app.state.viewport.zoom
+  const toleranceLocal = 18 / scale
 
+  if (app.state.currentTool === 'panel') {
+    const zoneHit = hitTestZoneEdge(drawing.state.zones, local, toleranceLocal)
+    drawing.setHover(zoneHit)
+    return
+  }
+
+  const panelHit = hitTestPanel(drawing.state.panels, local)
+
+  if (panelHit) {
+    drawing.setHover(panelHit)
+    return
+  }
+
+  const zoneHit = hitTestZoneEdge(drawing.state.zones, local, toleranceLocal)
+  drawing.setHover(zoneHit)
+} // End updateHover
+//=================
 function onPointerDown(event) {
   viewportRef.value.focus()
+
   const local = localFromEvent(event)
+
+  const canvasRect = canvasRef.value.getBoundingClientRect()
+
+  const dimHit = getWallDimHit(
+    app.state.viewport,
+    projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
+    event.clientX - canvasRect.left,
+    event.clientY - canvasRect.top
+  )
+
+  if (dimHit) {
+    wall.setEditingDim(dimHit)
+    app.clearCommand()
+    app.setStatus(`Nhập kích thước tường: ${dimHit}`)
+    draw()
+    return
+  }
 
   if (event.button === 1 || event.button === 2 || event.shiftKey) {
     panning = true
@@ -106,42 +215,80 @@ function onPointerDown(event) {
     return
   }
 
+  const gripHit = app.state.currentTool === 'move' ? hitTestMoveGrip(local) : null
   const panelHit = hitTestPanel(drawing.state.panels, local)
+
   if (app.state.currentTool === 'panel' && drawing.state.hover?.type === 'zone-edge') {
     drawing.addPanelFromHover()
     draw()
     return
   }
 
+  if (app.state.currentTool === 'move' && gripHit) {
+    drawing.selectPanel(gripHit.panel.id)
+    drawing.startMove(gripHit.panel.id, gripHit.gripPoint)
+    draw()
+    return
+  }
+
   if ((app.state.currentTool === 'select' || app.state.currentTool === 'move') && panelHit) {
     drawing.selectPanel(panelHit.panel.id)
-    if (app.state.currentTool === 'move') drawing.startMove(panelHit.panel.id, local)
-  } else if (app.state.currentTool === 'select') {
+
+    if (app.state.currentTool === 'move') {
+      drawing.startMove(panelHit.panel.id, local)
+    }
+
+    draw()
+    return
+  }
+
+  if (app.state.currentTool === 'select') {
     drawing.clearSelection()
   }
-  draw()
-}
 
+  draw()
+} // End onPointerDown
 function onPointerMove(event) {
   const local = localFromEvent(event)
+
   if (panning && panStart && panOriginal) {
     app.setPan(panOriginal.x + event.clientX - panStart.x, panOriginal.y + event.clientY - panStart.y)
     draw()
     return
   }
+
   if (drawing.state.drag.active) {
-    drawing.updateMove(local, event.altKey)
+    const snapResult = createMoveSnapResult(
+      local,
+      drawing.state.panels,
+      drawing.state.drag.panelId
+    )
+
+    const movePoint = snapResult.active ? snapResult.point : local
+
+    drawing.setSnapPreview(snapResult.active ? snapResult.snap : null)
+    drawing.updateMove(movePoint, event.shiftKey)
     draw()
     return
   }
+
+  drawing.clearSnapPreview()
   updateHover(local)
   draw()
-}
+} // End onPointerMove
 
+//=================
 function onPointerUp() {
+  if (drawing.state.drag.active) {
+    drawing.endMove()
+    drawing.clearSnapPreview()
+  }
+
   panning = false
-  drawing.endMove()
-}
+  panStart = null
+  panOriginal = null
+  draw()
+} // End onPointerUp
 
 function onWheel(event) {
   const direction = event.deltaY < 0 ? 1 : -1
@@ -150,20 +297,84 @@ function onWheel(event) {
   draw()
 }
 
+//=================
 function onKeyDown(event) {
-  handleViewportKey(event)
-  nextTick(draw)
-}
+  const key = event.key
+
+  if (key === 'm' || key === 'M') {
+    app.setTool('move')
+    draw()
+    return
+  }
+
+  if (key === 'Escape') {
+    app.setTool('select')
+    drawing.cancelMove()
+    app.clearCommand()
+    draw()
+    return
+  }
+
+  if (key === 'Enter') {
+    const command = app.state.commandBuffer.trim()
+
+    if (command.startsWith('/')) {
+      const count = Number(command.slice(1))
+
+      if (Number.isFinite(count) && count > 1) {
+        drawing.splitSelectedPanel(count)
+      }
+    } else {
+      const distance = Number(command)
+
+      if (Number.isFinite(distance)) {
+        drawing.moveSelectedByDistance(distance)
+      }
+    }
+
+    app.clearCommand()
+    draw()
+    return
+  }
+
+  if (key === 'Backspace') {
+    event.preventDefault()
+    app.state.commandBuffer = app.state.commandBuffer.slice(0, -1)
+    draw()
+    return
+  }
+
+  if (/^[0-9./-]$/.test(key)) {
+    app.appendCommand(key)
+    draw()
+  }
+} // End onKeyDown
 
 watch(() => [cabinet.state.width, cabinet.state.depth, cabinet.state.height, cabinet.state.panelThickness, app.state.currentView], () => {
-  drawing.rebuildZones()
   draw()
 })
 watch(() => [drawing.state.panels.length, drawing.state.zones.length, drawing.state.selectedPanelId, app.state.mini3DVisible], draw)
-
+watch(() => [wall.state.width, wall.state.depth, wall.state.height, wall.state.editingDim], draw)
 onMounted(() => {
   resizeCanvas()
   window.addEventListener('resize', resizeCanvas)
 })
 onBeforeUnmount(() => window.removeEventListener('resize', resizeCanvas))
 </script>
+<style scoped>
+.mn-cursor-move {
+  cursor: move;
+}
+
+.mn-cursor-crosshair {
+  cursor: crosshair;
+}
+
+.mn-cursor-select {
+  cursor: default;
+}
+
+.mn-cursor-default {
+  cursor: default;
+}
+</style>

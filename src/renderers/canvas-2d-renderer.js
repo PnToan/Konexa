@@ -1,5 +1,6 @@
 import { localToScreen, getLocalScale } from './viewport-transform'
 
+//=================
 function drawLine(ctx, a, b, color = '#999', width = 1) {
   ctx.beginPath()
   ctx.strokeStyle = color
@@ -8,33 +9,42 @@ function drawLine(ctx, a, b, color = '#999', width = 1) {
   ctx.lineTo(b.x, b.y)
   ctx.stroke()
 }
+// End drawLine
 
+//=================
 function drawRectLocal(ctx, viewport, rect, options = {}) {
   const p1 = localToScreen(viewport, rect.x, rect.y)
   const p2 = localToScreen(viewport, rect.x + rect.width, rect.y + rect.height)
+
   const x = Math.min(p1.x, p2.x)
   const y = Math.min(p1.y, p2.y)
   const w = Math.abs(p2.x - p1.x)
   const h = Math.abs(p2.y - p1.y)
+
   if (options.fill) {
     ctx.fillStyle = options.fill
     ctx.fillRect(x, y, w, h)
   }
+
   if (options.stroke) {
     ctx.strokeStyle = options.stroke
     ctx.lineWidth = options.lineWidth || 1
     ctx.strokeRect(x, y, w, h)
   }
 }
+// End drawRectLocal
 
+//=================
 function drawGrid(ctx, viewport, width, height) {
   const scale = getLocalScale(viewport)
   const stepLocal = 100
   const stepScreen = stepLocal * scale
+
   if (stepScreen < 8) return
 
   const originX = viewport.localOriginX + viewport.panX
   const originY = viewport.localOriginY + viewport.panY
+
   const startX = Math.floor((0 - originX) / scale / stepLocal) * stepLocal
   const endX = Math.ceil((width - originX) / scale / stepLocal) * stepLocal
   const startY = Math.floor((originY - height) / scale / stepLocal) * stepLocal
@@ -43,19 +53,24 @@ function drawGrid(ctx, viewport, width, height) {
   ctx.beginPath()
   ctx.strokeStyle = '#e1e1e1'
   ctx.lineWidth = 1
+
   for (let x = startX; x <= endX; x += stepLocal) {
     const sx = localToScreen(viewport, x, 0).x
     ctx.moveTo(sx, 0)
     ctx.lineTo(sx, height)
   }
+
   for (let y = startY; y <= endY; y += stepLocal) {
     const sy = localToScreen(viewport, 0, y).y
     ctx.moveTo(0, sy)
     ctx.lineTo(width, sy)
   }
+
   ctx.stroke()
 }
+// End drawGrid
 
+//=================
 function drawRulers(ctx, viewport, width, height) {
   const topH = viewport.rulerTopHeight
   const leftW = viewport.rulerLeftWidth
@@ -65,6 +80,7 @@ function drawRulers(ctx, viewport, width, height) {
   ctx.fillStyle = '#eeeeee'
   ctx.fillRect(0, 0, width, topH)
   ctx.fillRect(0, 0, leftW, height)
+
   ctx.strokeStyle = '#9a9a9a'
   ctx.lineWidth = 1
   ctx.strokeRect(0, 0, width, topH)
@@ -77,6 +93,7 @@ function drawRulers(ctx, viewport, width, height) {
 
   const originX = viewport.localOriginX + viewport.panX
   const originY = viewport.localOriginY + viewport.panY
+
   const startX = Math.floor((0 - originX) / scale / stepLocal) * stepLocal
   const endX = Math.ceil((width - originX) / scale / stepLocal) * stepLocal
   const startY = Math.floor((originY - height) / scale / stepLocal) * stepLocal
@@ -85,26 +102,184 @@ function drawRulers(ctx, viewport, width, height) {
   for (let x = startX; x <= endX; x += stepLocal) {
     const sx = localToScreen(viewport, x, 0).x
     if (sx < leftW) continue
+
     drawLine(ctx, { x: sx, y: topH - 6 }, { x: sx, y: topH }, '#777')
     ctx.fillText(String(x), sx, 11)
   }
+
   ctx.textAlign = 'right'
+
   for (let y = startY; y <= endY; y += stepLocal) {
     const sy = localToScreen(viewport, 0, y).y
     if (sy < topH) continue
+
     drawLine(ctx, { x: leftW - 6, y: sy }, { x: leftW, y: sy }, '#777')
     ctx.fillText(String(y), leftW - 8, sy)
   }
 
   const origin = localToScreen(viewport, 0, 0)
+
   drawLine(ctx, { x: origin.x, y: 0 }, { x: origin.x, y: height }, '#3fa9f5', 1)
   drawLine(ctx, { x: 0, y: origin.y }, { x: width, y: origin.y }, '#3fa9f5', 1)
 }
+// End drawRulers
 
+//=================
+function drawWallHatch(ctx, viewport, rect) {
+  const p1 = localToScreen(viewport, rect.x, rect.y)
+  const p2 = localToScreen(viewport, rect.x + rect.width, rect.y + rect.height)
+
+  const x = Math.min(p1.x, p2.x)
+  const y = Math.min(p1.y, p2.y)
+  const w = Math.abs(p2.x - p1.x)
+  const h = Math.abs(p2.y - p1.y)
+
+  ctx.save()
+
+  ctx.beginPath()
+  ctx.rect(x, y, w, h)
+  ctx.clip()
+
+  ctx.strokeStyle = 'rgba(90, 90, 90, 0.35)'
+  ctx.lineWidth = 1
+
+  const step = 18
+
+  for (let i = -h; i < w + h; i += step) {
+    ctx.beginPath()
+    ctx.moveTo(x + i, y + h)
+    ctx.lineTo(x + i + h, y)
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+// End drawWallHatch
+
+//=================
+function drawWall(ctx, viewport, wallRect) {
+  drawRectLocal(ctx, viewport, wallRect, {
+    fill: '#b8b8b8',
+    stroke: '#666666',
+    lineWidth: 2
+  })
+
+  drawWallHatch(ctx, viewport, wallRect)
+}
+// End drawWall
+
+//=================
+function drawWallDims(ctx, viewport, wallRect, editingDim) {
+  const leftTop = localToScreen(viewport, wallRect.x, wallRect.y + wallRect.height)
+  const rightTop = localToScreen(viewport, wallRect.x + wallRect.width, wallRect.y + wallRect.height)
+  const leftBottom = localToScreen(viewport, wallRect.x, wallRect.y)
+
+  const topDimY = leftTop.y - 34
+  const leftDimX = leftTop.x - 42
+
+  const widthColor = editingDim === 'width' ? '#ff9f1a' : '#333333'
+  const heightColor = editingDim === 'height' ? '#ff9f1a' : '#333333'
+
+  drawLine(
+    ctx,
+    { x: leftTop.x, y: topDimY },
+    { x: rightTop.x, y: topDimY },
+    widthColor,
+    2
+  )
+
+  drawLine(
+    ctx,
+    { x: leftDimX, y: leftTop.y },
+    { x: leftDimX, y: leftBottom.y },
+    heightColor,
+    2
+  )
+
+  drawLine(
+    ctx,
+    { x: leftTop.x, y: topDimY - 6 },
+    { x: leftTop.x, y: topDimY + 6 },
+    widthColor,
+    2
+  )
+
+  drawLine(
+    ctx,
+    { x: rightTop.x, y: topDimY - 6 },
+    { x: rightTop.x, y: topDimY + 6 },
+    widthColor,
+    2
+  )
+
+  drawLine(
+    ctx,
+    { x: leftDimX - 6, y: leftTop.y },
+    { x: leftDimX + 6, y: leftTop.y },
+    heightColor,
+    2
+  )
+
+  drawLine(
+    ctx,
+    { x: leftDimX - 6, y: leftBottom.y },
+    { x: leftDimX + 6, y: leftBottom.y },
+    heightColor,
+    2
+  )
+
+  ctx.fillStyle = '#111111'
+  ctx.font = '12px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  ctx.fillText(String(Math.round(wallRect.width)), (leftTop.x + rightTop.x) / 2, topDimY - 12)
+
+  ctx.save()
+  ctx.translate(leftDimX - 16, (leftTop.y + leftBottom.y) / 2)
+  ctx.rotate(-Math.PI / 2)
+  ctx.fillText(String(Math.round(wallRect.height)), 0, 0)
+  ctx.restore()
+}
+// End drawWallDims
+
+//=================
+function hitTestWallDim(viewport, wallRect, screenX, screenY) {
+  const leftTop = localToScreen(viewport, wallRect.x, wallRect.y + wallRect.height)
+  const rightTop = localToScreen(viewport, wallRect.x + wallRect.width, wallRect.y + wallRect.height)
+  const leftBottom = localToScreen(viewport, wallRect.x, wallRect.y)
+
+  const topDimY = leftTop.y - 34
+  const leftDimX = leftTop.x - 42
+
+  const nearTop =
+    screenX >= Math.min(leftTop.x, rightTop.x) - 12 &&
+    screenX <= Math.max(leftTop.x, rightTop.x) + 12 &&
+    Math.abs(screenY - topDimY) <= 14
+
+  if (nearTop) return 'width'
+
+  const nearLeft =
+    Math.abs(screenX - leftDimX) <= 14 &&
+    screenY >= Math.min(leftTop.y, leftBottom.y) - 12 &&
+    screenY <= Math.max(leftTop.y, leftBottom.y) + 12
+
+  if (nearLeft) return 'height'
+
+  return null
+}
+// End hitTestWallDim
+
+//=================
 function drawZoneOverlay(ctx, viewport, zones, hover) {
   zones.forEach((zone) => {
-    drawRectLocal(ctx, viewport, zone, { stroke: 'rgba(63, 169, 245, 0.32)', lineWidth: 1 })
+    drawRectLocal(ctx, viewport, zone, {
+      stroke: 'rgba(63, 169, 245, 0.32)',
+      lineWidth: 1
+    })
+
     const center = localToScreen(viewport, zone.x + zone.width / 2, zone.y + zone.height / 2)
+
     ctx.fillStyle = 'rgba(63, 169, 245, 0.65)'
     ctx.font = '11px Arial'
     ctx.textAlign = 'center'
@@ -114,10 +289,13 @@ function drawZoneOverlay(ctx, viewport, zones, hover) {
   if (hover && hover.type === 'zone-edge') {
     const a = localToScreen(viewport, hover.segment.x1, hover.segment.y1)
     const b = localToScreen(viewport, hover.segment.x2, hover.segment.y2)
+
     drawLine(ctx, a, b, '#ff9f1a', 4)
   }
 }
+// End drawZoneOverlay
 
+//=================
 function drawPanels(ctx, viewport, panels, selectedPanelId) {
   panels.forEach((panel) => {
     drawRectLocal(ctx, viewport, panel, {
@@ -125,7 +303,9 @@ function drawPanels(ctx, viewport, panels, selectedPanelId) {
       stroke: selectedPanelId === panel.id ? '#ffea00' : '#444444',
       lineWidth: selectedPanelId === panel.id ? 3 : 1
     })
+
     const center = localToScreen(viewport, panel.x + panel.width / 2, panel.y + panel.height / 2)
+
     ctx.fillStyle = '#ffffff'
     ctx.font = '10px Arial'
     ctx.textAlign = 'center'
@@ -133,16 +313,46 @@ function drawPanels(ctx, viewport, panels, selectedPanelId) {
     ctx.fillText(panel.name, center.x, center.y)
   })
 }
+// End drawPanels
 
+//=================
+export function getWallDimHit(viewport, wallRect, screenX, screenY) {
+  return hitTestWallDim(viewport, wallRect, screenX, screenY)
+}
+// End getWallDimHit
+
+//=================
 export function renderCanvas2D(ctx, payload) {
-  const { width, height, viewport, cabinetRect, zones, panels, hover, selectedPanelId, showGrid } = payload
+  const {
+    width,
+    height,
+    viewport,
+    wallRect,
+    wallEditingDim,
+    cabinetRect,
+    zones,
+    panels,
+    hover,
+    selectedPanelId,
+    showGrid
+  } = payload
+
   ctx.clearRect(0, 0, width, height)
+
   ctx.fillStyle = '#f4f4f4'
   ctx.fillRect(0, 0, width, height)
 
   if (showGrid) drawGrid(ctx, viewport, width, height)
-  drawRectLocal(ctx, viewport, cabinetRect, { fill: 'rgba(255,255,255,0.62)', stroke: '#111111', lineWidth: 2 })
+
+  if (wallRect) {
+    drawWall(ctx, viewport, wallRect)
+    drawWallDims(ctx, viewport, wallRect, wallEditingDim)
+  }
+
   drawZoneOverlay(ctx, viewport, zones, hover)
+
   drawPanels(ctx, viewport, panels, selectedPanelId)
+
   drawRulers(ctx, viewport, width, height)
 }
+// End renderCanvas2D

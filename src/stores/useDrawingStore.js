@@ -8,6 +8,7 @@ const store = createSimpleStore({
   panels: [],
   zones: [],
   hover: null,
+  snapPreview: null,
   selectedPanelId: null,
   drag: {
     active: false,
@@ -23,6 +24,15 @@ const store = createSimpleStore({
   setHover(hit) {
     state.hover = hit
   },
+  //=================
+  setSnapPreview(snapPreview) {
+    state.snapPreview = snapPreview
+  }, // End setSnapPreview
+
+  //=================
+  clearSnapPreview() {
+    state.snapPreview = null
+  }, // End clearSnapPreview
   selectPanel(panelId) {
     state.selectedPanelId = panelId
   },
