@@ -191,22 +191,22 @@ function drawWallDims(ctx, viewport, wallRect, editingDim) {
   drawLine(ctx, { x: leftDimX - 6, y: leftTop.y }, { x: leftDimX + 6, y: leftTop.y }, heightColor, 2)
   drawLine(ctx, { x: leftDimX - 6, y: leftBottom.y }, { x: leftDimX + 6, y: leftBottom.y }, heightColor, 2)
 
-ctx.fillStyle = '#111111'
-ctx.font = '12px Arial'
-ctx.textAlign = 'center'
-ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#111111'
+  ctx.font = '12px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
 
-if (editingDim !== 'width') {
-  ctx.fillText(String(Math.round(wallRect.width)), (leftTop.x + rightTop.x) / 2, topDimY - 12)
-}
+  if (editingDim !== 'width') {
+    ctx.fillText(String(Math.round(wallRect.width)), (leftTop.x + rightTop.x) / 2, topDimY - 12)
+  }
 
-if (editingDim !== 'height') {
-  ctx.save()
-  ctx.translate(leftDimX - 16, (leftTop.y + leftBottom.y) / 2)
-  ctx.rotate(-Math.PI / 2)
-  ctx.fillText(String(Math.round(wallRect.height)), 0, 0)
-  ctx.restore()
-}
+  if (editingDim !== 'height') {
+    ctx.save()
+    ctx.translate(leftDimX - 16, (leftTop.y + leftBottom.y) / 2)
+    ctx.rotate(-Math.PI / 2)
+    ctx.fillText(String(Math.round(wallRect.height)), 0, 0)
+    ctx.restore()
+  }
 } // End drawWallDims
 
 //=================
@@ -220,19 +220,37 @@ function hitTestWallDim(viewport, wallRect, screenX, screenY) {
   const topDimY = leftTop.y - 34
   const leftDimX = leftTop.x - 42
 
-  const nearTop =
-    screenX >= Math.min(leftTop.x, rightTop.x) - 14 &&
-    screenX <= Math.max(leftTop.x, rightTop.x) + 14 &&
-    Math.abs(screenY - topDimY) <= 16
+  const widthTextX = (leftTop.x + rightTop.x) / 2
+  const widthTextY = topDimY - 12
 
-  if (nearTop) return 'width'
+  const heightTextX = leftDimX - 16
+  const heightTextY = (leftTop.y + leftBottom.y) / 2
 
-  const nearLeft =
-    Math.abs(screenX - leftDimX) <= 16 &&
-    screenY >= Math.min(leftTop.y, leftBottom.y) - 14 &&
-    screenY <= Math.max(leftTop.y, leftBottom.y) + 14
+  const widthTextHit =
+    Math.abs(screenX - widthTextX) <= 48 &&
+    Math.abs(screenY - widthTextY) <= 18
 
-  if (nearLeft) return 'height'
+  if (widthTextHit) return 'width'
+
+  const heightTextHit =
+    Math.abs(screenX - heightTextX) <= 28 &&
+    Math.abs(screenY - heightTextY) <= 48
+
+  if (heightTextHit) return 'height'
+
+  const widthLineHit =
+    screenX >= Math.min(leftTop.x, rightTop.x) - 18 &&
+    screenX <= Math.max(leftTop.x, rightTop.x) + 18 &&
+    Math.abs(screenY - topDimY) <= 22
+
+  if (widthLineHit) return 'width'
+
+  const heightLineHit =
+    Math.abs(screenX - leftDimX) <= 22 &&
+    screenY >= Math.min(leftTop.y, leftBottom.y) - 18 &&
+    screenY <= Math.max(leftTop.y, leftBottom.y) + 18
+
+  if (heightLineHit) return 'height'
 
   return null
 } // End hitTestWallDim

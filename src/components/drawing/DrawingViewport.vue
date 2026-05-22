@@ -12,14 +12,15 @@
       @contextmenu.prevent
     />
     <input
-        v-if="dimInput.active"
-        ref="dimInputRef"
-        class="mn-dim-input"
-        :style="dimInputStyle"
-        v-model="dimInput.value"
-        @keydown="onDimInputKeyDown"
-        @blur="cancelDimInput"
-      />
+      v-if="dimInput.active"
+      ref="dimInputRef"
+      type="number"
+      class="mn-dim-input"
+      :style="dimInputStyle"
+      v-model="dimInput.value"
+      @keydown="onDimInputKeyDown"
+      @blur="cancelDimInput"
+    />
     <Mini3DPreview v-if="app.state.mini3DVisible" />
     <div class="mn-quick-view-bar">
       <button v-for="view in views" :key="view.id" class="mn-quick-view-btn" :class="{ active: app.state.currentView === view.id }" @click="app.setView(view.id)">{{ view.label }}</button>
@@ -61,6 +62,7 @@ const dimInput = ref({
   y: 0,
   value: ''
 })
+const hoverDim = ref(null)
 let ctx = null
 let ratio = 1
 let panning = false
@@ -87,6 +89,7 @@ const dimInputStyle = computed(() => ({
   top: `${dimInput.value.y}px`
 }))
 const canvasCursorClass = computed(() => {
+  if (hoverDim.value) return 'mn-cursor-pointer'
   if (app.state.currentTool === 'move') return 'mn-cursor-move'
   if (app.state.currentTool === 'panel') return 'mn-cursor-crosshair'
   if (app.state.currentTool === 'select') return 'mn-cursor-select'
@@ -293,7 +296,7 @@ function onPointerDown(event) {
   viewportRef.value.focus()
 
   const local = localFromEvent(event)
-
+  
   const canvasRect = canvasRef.value.getBoundingClientRect()
 
   const dimHit = getWallDimHit(
@@ -303,8 +306,8 @@ function onPointerDown(event) {
     event.clientY - canvasRect.top
   )
 
-  if (dimHit) {
-    openDimInput(dimHit)
+  if (dimHit || hoverDim.value) {
+    openDimInput(dimHit || hoverDim.value)
     return
   }
 
@@ -350,7 +353,13 @@ function onPointerDown(event) {
 } // End onPointerDown
 function onPointerMove(event) {
   const local = localFromEvent(event)
-
+  const canvasRect = canvasRef.value.getBoundingClientRect()
+  hoverDim.value = getWallDimHit(
+    app.state.viewport,
+    projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
+    event.clientX - canvasRect.left,
+    event.clientY - canvasRect.top
+  )
   if (panning && panStart && panOriginal) {
     app.setPan(panOriginal.x + event.clientX - panStart.x, panOriginal.y + event.clientY - panStart.y)
     draw()
@@ -439,19 +448,22 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeCanvas))
 .mn-cursor-default {
   cursor: default;
 }
+.mn-cursor-pointer {
+  cursor: pointer;
+}
 .mn-dim-input {
   position: absolute;
-  width: 78px;
-  height: 24px;
+  width: 72px;
+  height: 26px;
   transform: translate(-50%, -50%);
   z-index: 20;
-  border: 1px solid #ff9f1a;
-  border-radius: 4px;
+  border: 1px solid #1a73e8;
+  border-radius: 3px;
   background: #ffffff;
   color: #111111;
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
   outline: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  box-shadow: none;
 }
 </style>
