@@ -1,4 +1,5 @@
 import { createSimpleStore } from './createStore'
+import { getCameraConfig } from '../core/view/view-camera'
 
 const AXIS_COLOR = {
   X: '#e53935',
@@ -161,8 +162,10 @@ const store = createSimpleStore({
     state.mouse.y = payload.y
     state.mouse.localX = payload.localX
     state.mouse.localY = payload.localY
+    state.mouse.worldX = payload.worldX || 0
+    state.mouse.worldY = payload.worldY || 0
+    state.mouse.worldZ = payload.worldZ || 0
   },
-
   setViewportSize(width, height) {
     state.viewport.width = width
     state.viewport.height = height
@@ -192,7 +195,24 @@ const store = createSimpleStore({
   },
 
   getViewConfig(view = state.currentView) {
-    return VIEW_CONFIG[view] || VIEW_CONFIG.front
+    const camera = getCameraConfig(view)
+    const axisA = camera.axisU.toUpperCase()
+    const axisB = camera.axisV.toUpperCase()
+
+    return {
+      key: camera.key,
+      label: camera.label,
+      axesText: `${axisA}0${axisB}${camera.reverseU ? ' đối diện' : ''}`,
+      axisA,
+      axisB,
+      horizontalAxis: axisA,
+      verticalAxis: axisB,
+      horizontalColor: AXIS_COLOR[axisA],
+      verticalColor: AXIS_COLOR[axisB],
+      reverseHorizontal: camera.reverseU,
+      reverseVertical: camera.reverseV,
+      originCorner: camera.reverseU ? 'bottom-right' : 'bottom-left'
+    }
   },
 
   getActiveToolLabel() {
@@ -200,11 +220,15 @@ const store = createSimpleStore({
   },
 
   getActiveViewLabel() {
-    return (VIEW_CONFIG[state.currentView] || VIEW_CONFIG.front).label
+    return getCameraConfig(state.currentView).label
   },
 
   getActiveViewAxesText() {
-    return (VIEW_CONFIG[state.currentView] || VIEW_CONFIG.front).axesText
+    const camera = getCameraConfig(state.currentView)
+    const axisA = camera.axisU.toUpperCase()
+    const axisB = camera.axisV.toUpperCase()
+
+    return `${axisA}0${axisB}${camera.reverseU ? ' đối diện' : ''}`
   }
 }))
 
@@ -213,5 +237,22 @@ export function useAppStore() {
 }
 
 export function getViewConfig(view) {
-  return VIEW_CONFIG[view] || VIEW_CONFIG.front
+  const camera = getCameraConfig(view)
+  const axisA = camera.axisU.toUpperCase()
+  const axisB = camera.axisV.toUpperCase()
+
+  return {
+    key: camera.key,
+    label: camera.label,
+    axesText: `${axisA}0${axisB}${camera.reverseU ? ' đối diện' : ''}`,
+    axisA,
+    axisB,
+    horizontalAxis: axisA,
+    verticalAxis: axisB,
+    horizontalColor: AXIS_COLOR[axisA],
+    verticalColor: AXIS_COLOR[axisB],
+    reverseHorizontal: camera.reverseU,
+    reverseVertical: camera.reverseV,
+    originCorner: camera.reverseU ? 'bottom-right' : 'bottom-left'
+  }
 }

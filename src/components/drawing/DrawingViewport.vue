@@ -62,16 +62,9 @@ const axisHorizontal = computed(() => activeViewConfig.value.axisA || 'X')
 const axisVertical = computed(() => activeViewConfig.value.axisB || 'Y')
 //=================
 function getWallBox3D() {
-  return {
-    id: 'wall_main',
-    x: wall.state.x,
-    y: wall.state.y,
-    z: wall.state.z,
-    width: wall.state.width,
-    depth: wall.state.depth,
-    height: wall.state.height
-  }
+  return wall.getBox3D()
 } // End getWallBox3D
+
 const canvasCursorClass = computed(() => {
   if (app.state.currentTool === 'move') return 'mn-cursor-move'
   if (app.state.currentTool === 'panel') return 'mn-cursor-crosshair'

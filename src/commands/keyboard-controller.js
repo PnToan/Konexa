@@ -1,10 +1,12 @@
 import { parseCommand } from './command-parser'
 import { useAppStore } from '../stores/useAppStore'
 import { useDrawingStore } from '../stores/useDrawingStore'
+import { useWallStore } from '../stores/useWallStore'
 
 export function handleViewportKey(event) {
   const app = useAppStore()
   const drawing = useDrawingStore()
+  const wall = useWallStore()
   const allowed = '0123456789./-'
 
   if (event.key === 'Delete' || event.key === 'Backspace' && !app.state.commandBuffer) {
@@ -15,6 +17,7 @@ export function handleViewportKey(event) {
   if (event.key === 'Escape') {
     app.clearCommand()
     drawing.clearSelection()
+    wall.clearEditingDim()
     app.setStatus('Đã hủy lệnh')
     return
   }
@@ -26,9 +29,19 @@ export function handleViewportKey(event) {
 
   if (event.key === 'Enter') {
     const command = parseCommand(app.state.commandBuffer)
-    if (command.type === 'split') drawing.splitHoveredZone(command.count)
-    else if (command.type === 'number') drawing.moveSelectedByNumber(command.value)
-    else app.setStatus('Lệnh không hợp lệ')
+
+    if (wall.state.editingDim && command.type === 'number') {
+      wall.setSize(wall.state.editingDim, command.value)
+      app.setStatus(`Đã cập nhật Wall ${wall.state.editingDim}: ${command.value}mm`)
+      wall.clearEditingDim()
+    } else if (command.type === 'split') {
+      drawing.splitHoveredZone(command.count)
+    } else if (command.type === 'number') {
+      drawing.moveSelectedByNumber(command.value)
+    } else {
+      app.setStatus('Lệnh không hợp lệ')
+    }
+
     app.clearCommand()
     return
   }

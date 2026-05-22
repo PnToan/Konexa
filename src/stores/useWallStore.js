@@ -10,68 +10,46 @@ const store = createSimpleStore({
   height: 2650,
   editingDim: null
 }, (state) => ({
+  //=================
   setSize(key, value) {
     if (!['width', 'depth', 'height'].includes(key)) return
-    state[key] = normalizePositiveNumber(value, state[key] || 1)
-  },
 
+    state[key] = normalizePositiveNumber(value, state[key] || 1)
+  }, // End setSize
+
+  //=================
+  setPosition(axis, value) {
+    if (!['x', 'y', 'z'].includes(axis)) return
+
+    const numberValue = Number(value)
+
+    if (!Number.isFinite(numberValue)) return
+
+    state[axis] = numberValue
+  }, // End setPosition
+
+  //=================
   setEditingDim(dimKey) {
     state.editingDim = dimKey
-  },
+  }, // End setEditingDim
 
+  //=================
   clearEditingDim() {
     state.editingDim = null
-  },
+  }, // End clearEditingDim
 
-wallRect2D(viewKey = 'top') {
-  if (viewKey === 'front') {
+  //=================
+  getBox3D() {
     return {
       id: 'wall_main',
       x: state.x,
-      y: state.z,
+      y: state.y,
+      z: state.z,
       width: state.width,
+      depth: state.depth,
       height: state.height
     }
-  }
-
-  if (viewKey === 'back') {
-    return {
-      id: 'wall_main',
-      x: state.x,
-      y: state.z,
-      width: state.width,
-      height: state.height
-    }
-  }
-
-  if (viewKey === 'left') {
-    return {
-      id: 'wall_main',
-      x: state.y,
-      y: state.z,
-      width: state.depth,
-      height: state.height
-    }
-  }
-
-  if (viewKey === 'right') {
-    return {
-      id: 'wall_main',
-      x: state.y,
-      y: state.z,
-      width: state.depth,
-      height: state.height
-    }
-  }
-
-  return {
-    id: 'wall_main',
-    x: state.x,
-    y: state.y,
-    width: state.width,
-    height: state.depth
-  }
-}
+  } // End getBox3D
 }))
 
 export function useWallStore() {
