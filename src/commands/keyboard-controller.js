@@ -3,13 +3,14 @@ import { useAppStore } from '../stores/useAppStore'
 import { useDrawingStore } from '../stores/useDrawingStore'
 import { useWallStore } from '../stores/useWallStore'
 
+//=================
 export function handleViewportKey(event) {
   const app = useAppStore()
   const drawing = useDrawingStore()
   const wall = useWallStore()
   const allowed = '0123456789./-'
 
-  if (event.key === 'Delete' || event.key === 'Backspace' && !app.state.commandBuffer) {
+  if ((event.key === 'Delete' || event.key === 'Backspace') && !app.state.commandBuffer) {
     drawing.deleteSelected()
     return
   }
@@ -24,6 +25,7 @@ export function handleViewportKey(event) {
 
   if (event.key === 'Backspace') {
     app.state.commandBuffer = app.state.commandBuffer.slice(0, -1)
+    app.setStatus(app.state.commandBuffer ? `Nhập lệnh: ${app.state.commandBuffer}` : 'Đã xóa lệnh')
     return
   }
 
@@ -50,4 +52,4 @@ export function handleViewportKey(event) {
     app.appendCommand(event.key)
     app.setStatus(`Nhập lệnh: ${app.state.commandBuffer}`)
   }
-}
+} // End handleViewportKey

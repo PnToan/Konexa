@@ -11,6 +11,15 @@
       @wheel.prevent="onWheel"
       @contextmenu.prevent
     />
+    <input
+        v-if="dimInput.active"
+        ref="dimInputRef"
+        class="mn-dim-input"
+        :style="dimInputStyle"
+        v-model="dimInput.value"
+        @keydown="onDimInputKeyDown"
+        @blur="cancelDimInput"
+      />
     <Mini3DPreview v-if="app.state.mini3DVisible" />
     <div class="mn-quick-view-bar">
       <button v-for="view in views" :key="view.id" class="mn-quick-view-btn" :class="{ active: app.state.currentView === view.id }" @click="app.setView(view.id)">{{ view.label }}</button>
@@ -33,7 +42,7 @@ import { useCabinetStore } from '../../stores/useCabinetStore'
 import { useWallStore } from '../../stores/useWallStore'
 import { useDrawingStore } from '../../stores/useDrawingStore'
 import { renderCanvas2D, getWallDimHit } from '../../renderers/canvas-2d-renderer'
-import { screenToLocal } from '../../renderers/viewport-transform'
+import { screenToLocal, localToScreen } from '../../renderers/viewport-transform'
 import { projectBoxToCameraRect, cameraLocalToWorldPoint } from '../../core/view/view-camera'
 import { createMoveSnapResult, getPanelSnapPoints, hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
 import { handleViewportKey } from '../../commands/keyboard-controller'
@@ -44,6 +53,14 @@ const wall = useWallStore()
 const drawing = useDrawingStore()
 const viewportRef = ref(null)
 const canvasRef = ref(null)
+const dimInputRef = ref(null)
+const dimInput = ref({
+  active: false,
+  key: null,
+  x: 0,
+  y: 0,
+  value: ''
+})
 let ctx = null
 let ratio = 1
 let panning = false
@@ -57,14 +74,18 @@ const views = [
 const zoomLabel = computed(() => `${Math.round(app.state.viewport.zoom * 100)}%`)
 const localX = computed(() => Math.round(app.state.mouse.localX))
 const localY = computed(() => Math.round(app.state.mouse.localY))
-const activeViewConfig = computed(() => app.getViewConfig(app.state.currentView))
-const axisHorizontal = computed(() => activeViewConfig.value.axisA || 'X')
-const axisVertical = computed(() => activeViewConfig.value.axisB || 'Y')
+
 //=================
 function getWallBox3D() {
   return wall.getBox3D()
 } // End getWallBox3D
-
+const activeViewConfig = computed(() => app.getViewConfig(app.state.currentView))
+const axisHorizontal = computed(() => activeViewConfig.value.axisA || 'X')
+const axisVertical = computed(() => activeViewConfig.value.axisB || 'Y')
+const dimInputStyle = computed(() => ({
+  left: `${dimInput.value.x}px`,
+  top: `${dimInput.value.y}px`
+}))
 const canvasCursorClass = computed(() => {
   if (app.state.currentTool === 'move') return 'mn-cursor-move'
   if (app.state.currentTool === 'panel') return 'mn-cursor-crosshair'
@@ -101,11 +122,9 @@ function draw() {
     viewport,
     wallRect,
     wallEditingDim: wall.state.editingDim,
-    cabinetRect: cabinet.cabinetRect2D(),
     zones: drawing.state.zones,
     panels: drawing.state.panels,
     hover: drawing.state.hover,
-    snapPreview: drawing.state.snapPreview,
     selectedPanelId: drawing.state.selectedPanelId,
     showGrid: app.state.showGrid
   })
@@ -132,7 +151,6 @@ function localFromEvent(event) {
 
   return cameraLocal
 } // End localFromEvent
-//=================
 function hitTestMoveGrip(local) {
   const tolerance = 14 / (app.state.viewport.localScale * app.state.viewport.zoom)
   const hoverPanel = drawing.state.hover?.type === 'panel' ? drawing.state.hover.panel : null
@@ -179,6 +197,98 @@ function updateHover(local) {
   drawing.setHover(zoneHit)
 } // End updateHover
 //=================
+function getWallDimInputInfo(dimKey) {
+  const rect = projectBoxToCameraRect(getWallBox3D(), app.state.currentView)
+  const viewport = app.state.viewport
+
+  const leftTop = localToScreen(viewport, rect.x, rect.y + rect.height)
+  const rightTop = localToScreen(viewport, rect.x + rect.width, rect.y + rect.height)
+  const leftBottom = localToScreen(viewport, rect.x, rect.y)
+
+  if (dimKey === 'width') {
+    return {
+      key: 'width',
+      value: String(Math.round(rect.width)),
+      x: (leftTop.x + rightTop.x) / 2,
+      y: leftTop.y - 46
+    }
+  }
+
+  if (dimKey === 'height') {
+    return {
+      key: 'height',
+      value: String(Math.round(rect.height)),
+      x: leftTop.x - 58,
+      y: (leftTop.y + leftBottom.y) / 2
+    }
+  }
+
+  return null
+} // End getWallDimInputInfo
+
+//=================
+function openDimInput(dimKey) {
+  const info = getWallDimInputInfo(dimKey)
+
+  if (!info) return
+
+  dimInput.value = {
+    active: true,
+    key: info.key,
+    x: info.x,
+    y: info.y,
+    value: info.value
+  }
+
+  wall.setEditingDim(info.key)
+  app.clearCommand()
+  app.setStatus(`Nhập kích thước Wall: ${info.key}`)
+
+  nextTick(() => {
+    dimInputRef.value?.focus()
+    dimInputRef.value?.select()
+  })
+
+  draw()
+} // End openDimInput
+
+//=================
+function cancelDimInput() {
+  dimInput.value.active = false
+  wall.clearEditingDim()
+  draw()
+} // End cancelDimInput
+
+//=================
+function commitDimInput() {
+  const numberValue = Number(dimInput.value.value)
+
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    cancelDimInput()
+    return
+  }
+
+  wall.setSize(dimInput.value.key, numberValue)
+  app.setStatus(`Đã cập nhật Wall ${dimInput.value.key}: ${numberValue}mm`)
+  dimInput.value.active = false
+  wall.clearEditingDim()
+  draw()
+} // End commitDimInput
+
+//=================
+function onDimInputKeyDown(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    commitDimInput()
+    return
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelDimInput()
+  }
+} // End onDimInputKeyDown
+//=================
 function onPointerDown(event) {
   viewportRef.value.focus()
 
@@ -194,10 +304,7 @@ function onPointerDown(event) {
   )
 
   if (dimHit) {
-    wall.setEditingDim(dimHit)
-    app.clearCommand()
-    app.setStatus(`Nhập kích thước tường: ${dimHit}`)
-    draw()
+    openDimInput(dimHit)
     return
   }
 
@@ -292,6 +399,7 @@ function onWheel(event) {
 
 //=================
 function onKeyDown(event) {
+  if (dimInput.value.active) return
   const key = event.key
 
   if (key === 'm' || key === 'M') {
@@ -300,47 +408,8 @@ function onKeyDown(event) {
     return
   }
 
-  if (key === 'Escape') {
-    app.setTool('select')
-    drawing.cancelMove()
-    app.clearCommand()
-    draw()
-    return
-  }
-
-  if (key === 'Enter') {
-    const command = app.state.commandBuffer.trim()
-
-    if (command.startsWith('/')) {
-      const count = Number(command.slice(1))
-
-      if (Number.isFinite(count) && count > 1) {
-        drawing.splitSelectedPanel(count)
-      }
-    } else {
-      const distance = Number(command)
-
-      if (Number.isFinite(distance)) {
-        drawing.moveSelectedByDistance(distance)
-      }
-    }
-
-    app.clearCommand()
-    draw()
-    return
-  }
-
-  if (key === 'Backspace') {
-    event.preventDefault()
-    app.state.commandBuffer = app.state.commandBuffer.slice(0, -1)
-    draw()
-    return
-  }
-
-  if (/^[0-9./-]$/.test(key)) {
-    app.appendCommand(key)
-    draw()
-  }
+  handleViewportKey(event)
+  draw()
 } // End onKeyDown
 
 watch(() => [cabinet.state.width, cabinet.state.depth, cabinet.state.height, cabinet.state.panelThickness, app.state.currentView], () => {
@@ -369,5 +438,20 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeCanvas))
 
 .mn-cursor-default {
   cursor: default;
+}
+.mn-dim-input {
+  position: absolute;
+  width: 78px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  border: 1px solid #ff9f1a;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 12px;
+  text-align: center;
+  outline: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 </style>

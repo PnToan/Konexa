@@ -8,11 +8,12 @@ function drawLine(ctx, a, b, color = '#999', width = 1) {
   ctx.moveTo(a.x, a.y)
   ctx.lineTo(b.x, b.y)
   ctx.stroke()
-}
-// End drawLine
+} // End drawLine
 
 //=================
 function drawRectLocal(ctx, viewport, rect, options = {}) {
+  if (!rect) return
+
   const p1 = localToScreen(viewport, rect.x, rect.y)
   const p2 = localToScreen(viewport, rect.x + rect.width, rect.y + rect.height)
 
@@ -31,8 +32,7 @@ function drawRectLocal(ctx, viewport, rect, options = {}) {
     ctx.lineWidth = options.lineWidth || 1
     ctx.strokeRect(x, y, w, h)
   }
-}
-// End drawRectLocal
+} // End drawRectLocal
 
 //=================
 function drawGrid(ctx, viewport, width, height) {
@@ -67,8 +67,7 @@ function drawGrid(ctx, viewport, width, height) {
   }
 
   ctx.stroke()
-}
-// End drawGrid
+} // End drawGrid
 
 //=================
 function drawRulers(ctx, viewport, width, height) {
@@ -121,11 +120,12 @@ function drawRulers(ctx, viewport, width, height) {
 
   drawLine(ctx, { x: origin.x, y: 0 }, { x: origin.x, y: height }, '#3fa9f5', 1)
   drawLine(ctx, { x: 0, y: origin.y }, { x: width, y: origin.y }, '#3fa9f5', 1)
-}
-// End drawRulers
+} // End drawRulers
 
 //=================
 function drawWallHatch(ctx, viewport, rect) {
+  if (!rect) return
+
   const p1 = localToScreen(viewport, rect.x, rect.y)
   const p2 = localToScreen(viewport, rect.x + rect.width, rect.y + rect.height)
 
@@ -153,11 +153,12 @@ function drawWallHatch(ctx, viewport, rect) {
   }
 
   ctx.restore()
-}
-// End drawWallHatch
+} // End drawWallHatch
 
 //=================
 function drawWall(ctx, viewport, wallRect) {
+  if (!wallRect) return
+
   drawRectLocal(ctx, viewport, wallRect, {
     fill: '#b8b8b8',
     stroke: '#666666',
@@ -165,11 +166,12 @@ function drawWall(ctx, viewport, wallRect) {
   })
 
   drawWallHatch(ctx, viewport, wallRect)
-}
-// End drawWall
+} // End drawWall
 
 //=================
 function drawWallDims(ctx, viewport, wallRect, editingDim) {
+  if (!wallRect) return
+
   const leftTop = localToScreen(viewport, wallRect.x, wallRect.y + wallRect.height)
   const rightTop = localToScreen(viewport, wallRect.x + wallRect.width, wallRect.y + wallRect.height)
   const leftBottom = localToScreen(viewport, wallRect.x, wallRect.y)
@@ -180,71 +182,37 @@ function drawWallDims(ctx, viewport, wallRect, editingDim) {
   const widthColor = editingDim === 'width' ? '#ff9f1a' : '#333333'
   const heightColor = editingDim === 'height' ? '#ff9f1a' : '#333333'
 
-  drawLine(
-    ctx,
-    { x: leftTop.x, y: topDimY },
-    { x: rightTop.x, y: topDimY },
-    widthColor,
-    2
-  )
+  drawLine(ctx, { x: leftTop.x, y: topDimY }, { x: rightTop.x, y: topDimY }, widthColor, 2)
+  drawLine(ctx, { x: leftDimX, y: leftTop.y }, { x: leftDimX, y: leftBottom.y }, heightColor, 2)
 
-  drawLine(
-    ctx,
-    { x: leftDimX, y: leftTop.y },
-    { x: leftDimX, y: leftBottom.y },
-    heightColor,
-    2
-  )
+  drawLine(ctx, { x: leftTop.x, y: topDimY - 6 }, { x: leftTop.x, y: topDimY + 6 }, widthColor, 2)
+  drawLine(ctx, { x: rightTop.x, y: topDimY - 6 }, { x: rightTop.x, y: topDimY + 6 }, widthColor, 2)
 
-  drawLine(
-    ctx,
-    { x: leftTop.x, y: topDimY - 6 },
-    { x: leftTop.x, y: topDimY + 6 },
-    widthColor,
-    2
-  )
+  drawLine(ctx, { x: leftDimX - 6, y: leftTop.y }, { x: leftDimX + 6, y: leftTop.y }, heightColor, 2)
+  drawLine(ctx, { x: leftDimX - 6, y: leftBottom.y }, { x: leftDimX + 6, y: leftBottom.y }, heightColor, 2)
 
-  drawLine(
-    ctx,
-    { x: rightTop.x, y: topDimY - 6 },
-    { x: rightTop.x, y: topDimY + 6 },
-    widthColor,
-    2
-  )
+ctx.fillStyle = '#111111'
+ctx.font = '12px Arial'
+ctx.textAlign = 'center'
+ctx.textBaseline = 'middle'
 
-  drawLine(
-    ctx,
-    { x: leftDimX - 6, y: leftTop.y },
-    { x: leftDimX + 6, y: leftTop.y },
-    heightColor,
-    2
-  )
-
-  drawLine(
-    ctx,
-    { x: leftDimX - 6, y: leftBottom.y },
-    { x: leftDimX + 6, y: leftBottom.y },
-    heightColor,
-    2
-  )
-
-  ctx.fillStyle = '#111111'
-  ctx.font = '12px Arial'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-
+if (editingDim !== 'width') {
   ctx.fillText(String(Math.round(wallRect.width)), (leftTop.x + rightTop.x) / 2, topDimY - 12)
+}
 
+if (editingDim !== 'height') {
   ctx.save()
   ctx.translate(leftDimX - 16, (leftTop.y + leftBottom.y) / 2)
   ctx.rotate(-Math.PI / 2)
   ctx.fillText(String(Math.round(wallRect.height)), 0, 0)
   ctx.restore()
 }
-// End drawWallDims
+} // End drawWallDims
 
 //=================
 function hitTestWallDim(viewport, wallRect, screenX, screenY) {
+  if (!wallRect) return null
+
   const leftTop = localToScreen(viewport, wallRect.x, wallRect.y + wallRect.height)
   const rightTop = localToScreen(viewport, wallRect.x + wallRect.width, wallRect.y + wallRect.height)
   const leftBottom = localToScreen(viewport, wallRect.x, wallRect.y)
@@ -253,25 +221,24 @@ function hitTestWallDim(viewport, wallRect, screenX, screenY) {
   const leftDimX = leftTop.x - 42
 
   const nearTop =
-    screenX >= Math.min(leftTop.x, rightTop.x) - 12 &&
-    screenX <= Math.max(leftTop.x, rightTop.x) + 12 &&
-    Math.abs(screenY - topDimY) <= 14
+    screenX >= Math.min(leftTop.x, rightTop.x) - 14 &&
+    screenX <= Math.max(leftTop.x, rightTop.x) + 14 &&
+    Math.abs(screenY - topDimY) <= 16
 
   if (nearTop) return 'width'
 
   const nearLeft =
-    Math.abs(screenX - leftDimX) <= 14 &&
-    screenY >= Math.min(leftTop.y, leftBottom.y) - 12 &&
-    screenY <= Math.max(leftTop.y, leftBottom.y) + 12
+    Math.abs(screenX - leftDimX) <= 16 &&
+    screenY >= Math.min(leftTop.y, leftBottom.y) - 14 &&
+    screenY <= Math.max(leftTop.y, leftBottom.y) + 14
 
   if (nearLeft) return 'height'
 
   return null
-}
-// End hitTestWallDim
+} // End hitTestWallDim
 
 //=================
-function drawZoneOverlay(ctx, viewport, zones, hover) {
+function drawZoneOverlay(ctx, viewport, zones = [], hover) {
   zones.forEach((zone) => {
     drawRectLocal(ctx, viewport, zone, {
       stroke: 'rgba(63, 169, 245, 0.32)',
@@ -292,11 +259,10 @@ function drawZoneOverlay(ctx, viewport, zones, hover) {
 
     drawLine(ctx, a, b, '#ff9f1a', 4)
   }
-}
-// End drawZoneOverlay
+} // End drawZoneOverlay
 
 //=================
-function drawPanels(ctx, viewport, panels, selectedPanelId) {
+function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
   panels.forEach((panel) => {
     drawRectLocal(ctx, viewport, panel, {
       fill: panel.color || '#e55353',
@@ -312,14 +278,12 @@ function drawPanels(ctx, viewport, panels, selectedPanelId) {
     ctx.textBaseline = 'middle'
     ctx.fillText(panel.name, center.x, center.y)
   })
-}
-// End drawPanels
+} // End drawPanels
 
 //=================
 export function getWallDimHit(viewport, wallRect, screenX, screenY) {
   return hitTestWallDim(viewport, wallRect, screenX, screenY)
-}
-// End getWallDimHit
+} // End getWallDimHit
 
 //=================
 export function renderCanvas2D(ctx, payload) {
@@ -329,7 +293,6 @@ export function renderCanvas2D(ctx, payload) {
     viewport,
     wallRect,
     wallEditingDim,
-    cabinetRect,
     zones,
     panels,
     hover,
@@ -354,5 +317,4 @@ export function renderCanvas2D(ctx, payload) {
   drawPanels(ctx, viewport, panels, selectedPanelId)
 
   drawRulers(ctx, viewport, width, height)
-}
-// End renderCanvas2D
+} // End renderCanvas2D
