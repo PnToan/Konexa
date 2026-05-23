@@ -256,24 +256,28 @@ function hitTestWallDim(viewport, wallRect, screenX, screenY) {
 //=================
 function drawZoneOverlay(ctx, viewport, zones = [], hover) {
   zones.forEach((zone) => {
+    const isHoverZone = hover?.type === 'zone-edge' && hover.zone?.id === zone.id
+
     drawRectLocal(ctx, viewport, zone, {
-      stroke: 'rgba(63, 169, 245, 0.32)',
-      lineWidth: 1
+      fill: isHoverZone ? 'rgba(255, 182, 193, 0.28)' : null,
+      stroke: isHoverZone ? 'rgba(255, 105, 180, 0.65)' : 'rgba(63, 169, 245, 0.28)',
+      lineWidth: isHoverZone ? 2 : 1
     })
 
     const center = localToScreen(viewport, zone.x + zone.width / 2, zone.y + zone.height / 2)
 
-    ctx.fillStyle = 'rgba(63, 169, 245, 0.65)'
+    ctx.fillStyle = isHoverZone ? 'rgba(190, 30, 110, 0.85)' : 'rgba(63, 169, 245, 0.55)'
     ctx.font = '11px Arial'
     ctx.textAlign = 'center'
-    ctx.fillText(zone.name, center.x, center.y)
+    ctx.textBaseline = 'middle'
+    ctx.fillText(zone.name || 'Zone', center.x, center.y)
   })
 
   if (hover && hover.type === 'zone-edge') {
     const a = localToScreen(viewport, hover.segment.x1, hover.segment.y1)
     const b = localToScreen(viewport, hover.segment.x2, hover.segment.y2)
 
-    drawLine(ctx, a, b, '#ff9f1a', 4)
+    drawLine(ctx, a, b, '#ff2f92', 5)
   }
 } // End drawZoneOverlay
 
@@ -335,7 +339,79 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
     drawPanelGrip(ctx, viewport, { x: rect.x, y: rect.y + rect.height })
   })
 } // End drawPanels
+//=================
+function drawPanelPreviewItems(ctx, viewport, previewItems = []) {
+  if (!Array.isArray(previewItems) || previewItems.length === 0) return
 
+  ctx.save()
+  ctx.setLineDash([8, 5])
+
+  previewItems.forEach((panel) => {
+    const rect = getPanelRect(panel)
+
+    if (!rect) return
+
+    drawRectLocal(ctx, viewport, rect, {
+      fill: 'rgba(255, 47, 146, 0.22)',
+      stroke: '#ff2f92',
+      lineWidth: 2
+    })
+
+    const center = localToScreen(viewport, rect.x + rect.width / 2, rect.y + rect.height / 2)
+
+    ctx.setLineDash([])
+    ctx.fillStyle = '#b0005a'
+    ctx.font = '12px Arial'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(panel.name || 'Preview', center.x, center.y)
+
+    ctx.font = '10px Arial'
+    ctx.fillText(
+      `${Math.round(panel.xSize || panel.width)} x ${Math.round(panel.ySize || panel.depth || 0)} x ${Math.round(panel.zSize || panel.height)}`,
+      center.x,
+      center.y + 15
+    )
+
+    ctx.setLineDash([8, 5])
+  })
+
+  ctx.restore()
+} // End drawPanelPreviewItems
+//=================
+function drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer) {
+  if (!hover || hover.type !== 'zone-edge') return
+  if (!panelInputBuffer) return
+
+  const zone = hover.zone
+  const point = localToScreen(viewport, zone.x + zone.width / 2, zone.y + zone.height / 2)
+
+  ctx.save()
+
+  const text = `Vẽ Tấm: ${panelInputBuffer}`
+  const paddingX = 10
+  const boxWidth = Math.max(96, text.length * 8)
+  const boxHeight = 28
+  const x = point.x - boxWidth / 2
+  const y = point.y - 44
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.94)'
+  ctx.strokeStyle = '#ff2f92'
+  ctx.lineWidth = 1.5
+
+  ctx.beginPath()
+  ctx.roundRect(x, y, boxWidth, boxHeight, 8)
+  ctx.fill()
+  ctx.stroke()
+
+  ctx.fillStyle = '#b0005a'
+  ctx.font = '13px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, point.x, y + boxHeight / 2)
+
+  ctx.restore()
+} // End drawPanelInputBuffer
 //=================
 function drawSnapPreview(ctx, viewport, snapPreview) {
   if (!snapPreview) return
@@ -567,6 +643,8 @@ export function renderCanvas2D(ctx, payload) {
     wallEditingDim,
     zones,
     panels,
+    panelPreviewItems,
+    panelInputBuffer,
     boxes,
     boxDraftRect,
     boxEditingDim,
@@ -591,7 +669,10 @@ export function renderCanvas2D(ctx, payload) {
 
   drawBoxes(ctx, viewport, boxes, selectedBoxId, boxEditingDim, currentView)
   drawBoxDraft(ctx, viewport, boxDraftRect, currentView)
+  drawZoneOverlay(ctx, viewport, zones, hover)
   drawPanels(ctx, viewport, panels, selectedPanelId)
+  drawPanelPreviewItems(ctx, viewport, panelPreviewItems)
+  drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer)
   drawSnapPreview(ctx, viewport, snapPreview)
   drawRulers(ctx, viewport, width, height)
 } // End renderCanvas2D

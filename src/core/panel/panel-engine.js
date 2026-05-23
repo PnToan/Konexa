@@ -31,17 +31,17 @@ function getZoneMaxX(zone) {
 } // End getZoneMaxX
 
 //=================
-function getZoneMinY(zone) {
-  return Number(zone.minY ?? zone.minZ ?? zone.y ?? 0)
-} // End getZoneMinY
+function getZoneMinZ(zone) {
+  return Number(zone.minZ ?? zone.minY ?? zone.y ?? 0)
+} // End getZoneMinZ
 
 //=================
-function getZoneMaxY(zone) {
-  if (Number.isFinite(Number(zone.maxY))) return Number(zone.maxY)
+function getZoneMaxZ(zone) {
   if (Number.isFinite(Number(zone.maxZ))) return Number(zone.maxZ)
+  if (Number.isFinite(Number(zone.maxY))) return Number(zone.maxY)
 
-  return getZoneMinY(zone) + Number(zone.height || 0)
-} // End getZoneMaxY
+  return getZoneMinZ(zone) + Number(zone.height || 0)
+} // End getZoneMaxZ
 
 //=================
 function getZoneWidth(zone) {
@@ -50,161 +50,230 @@ function getZoneWidth(zone) {
 
 //=================
 function getZoneHeight(zone) {
-  return getZoneMaxY(zone) - getZoneMinY(zone)
+  return getZoneMaxZ(zone) - getZoneMinZ(zone)
 } // End getZoneHeight
+
+//=================
+function getZoneDepth(zone) {
+  const sourceBox = zone.sourceBox || zone.baseObject || zone.source
+
+  return Number(
+    zone.depth ??
+    zone.ySize ??
+    sourceBox?.depth ??
+    sourceBox?.ySize ??
+    0
+  )
+} // End getZoneDepth
+
+//=================
+function getFrameId(zone) {
+  return zone.linkedFrameId ||
+    zone.frameId ||
+    zone.sourceBoxId ||
+    zone.baseObjectId ||
+    zone.sourceBox?.id ||
+    zone.baseObject?.id ||
+    zone.source?.id ||
+    null
+} // End getFrameId
+
+//=================
+function isPanelInSameFrame(panel, frameId) {
+  if (!panel || !frameId) return false
+
+  return panel.linkedFrameId === frameId ||
+    panel.frameId === frameId ||
+    panel.sourceBoxId === frameId ||
+    panel.baseObjectId === frameId
+} // End isPanelInSameFrame
+
+//=================
+function hasBothSidePanels(zone, panels = []) {
+  const frameId = getFrameId(zone)
+  const sameFramePanels = panels.filter((panel) => isPanelInSameFrame(panel, frameId))
+
+  const hasLeft = sameFramePanels.some((panel) => panel.panelSide === 'left' || panel.edge === 'left')
+  const hasRight = sameFramePanels.some((panel) => panel.panelSide === 'right' || panel.edge === 'right')
+
+  return hasLeft && hasRight
+} // End hasBothSidePanels
 
 //=================
 function createPanelBase(zone, edge, thickness, offset) {
   const id = nextPanelId(edge)
-  const sideNameMap = {
-    bottom: 'Tấm đáy',
-    top: 'Tấm nóc',
+  const frameId = getFrameId(zone)
+
+  const nameMap = {
     left: 'Hông trái',
-    right: 'Hông phải'
+    right: 'Hông phải',
+    top: 'Tấm nóc',
+    bottom: 'Tấm đáy'
   }
 
   return {
     id,
-    name: sideNameMap[edge] || `Tấm ${String(panelIndex - 1).padStart(3, '0')}`,
+    name: nameMap[edge] || `Tấm ${String(panelIndex - 1).padStart(3, '0')}`,
+
     type: 'panel_box',
+    material: 'Nhựa rỗng',
+
     zoneId: zone.id,
     panelBaseZone: zone.id,
-    linkedFrameId: zone.frameId || zone.cabinetId || zone.baseObjectId || null,
+
+    linkedFrameId: frameId,
+    frameId,
+    sourceBoxId: frameId,
+    baseObjectId: frameId,
+
     edge,
     panelSide: edge,
-    panelThickness: thickness,
-    thickness,
-    material: 'Nhựa rỗng',
+
     panelOffset: offset,
     panelOffsetFrom: edge,
+
+    panelThickness: thickness,
+    thickness,
+
     dimEnabled: false
   }
 } // End createPanelBase
 
 //=================
-export function createPanelOnZoneEdge(zone, edge, thickness = 18, offsetValue = 0) {
+function createVerticalPanel(zone, edge, thickness, offset) {
+  const minX = getZoneMinX(zone)
+  const maxX = getZoneMaxX(zone)
+  const minZ = getZoneMinZ(zone)
+  const zoneHeight = getZoneHeight(zone)
+  const zoneWidth = getZoneWidth(zone)
+  const zoneDepth = getZoneDepth(zone)
+
+  const safeOffset = clampNumber(offset, 0, Math.max(0, zoneWidth - thickness))
+  const x = edge === 'left'
+    ? minX + safeOffset
+    : maxX - thickness - safeOffset
+
+  return {
+    ...createPanelBase(zone, edge, thickness, safeOffset),
+
+    orientation: 'vertical',
+    panelKind: 'side',
+
+    x,
+    y: minZ,
+    z: minZ,
+
+    width: thickness,
+    height: zoneHeight,
+    depth: zoneDepth,
+
+    xSize: thickness,
+    ySize: zoneDepth,
+    zSize: zoneHeight,
+
+    color: '#e55353'
+  }
+} // End createVerticalPanel
+
+//=================
+function createHorizontalPanel(zone, edge, thickness, offset, panels = []) {
+  const minX = getZoneMinX(zone)
+  const maxX = getZoneMaxX(zone)
+  const minZ = getZoneMinZ(zone)
+  const maxZ = getZoneMaxZ(zone)
+  const zoneWidth = getZoneWidth(zone)
+  const zoneHeight = getZoneHeight(zone)
+  const zoneDepth = getZoneDepth(zone)
+
+  const safeOffset = clampNumber(offset, 0, Math.max(0, zoneHeight - thickness))
+  const hasTwoSidePanels = hasBothSidePanels(zone, panels)
+
+  const x = hasTwoSidePanels ? minX + thickness : minX
+  const width = hasTwoSidePanels
+    ? Math.max(1, zoneWidth - thickness * 2)
+    : zoneWidth
+
+  const z = edge === 'bottom'
+    ? minZ + safeOffset
+    : maxZ - thickness - safeOffset
+
+  return {
+    ...createPanelBase(zone, edge, thickness, safeOffset),
+
+    orientation: 'horizontal',
+    panelKind: 'top_bottom',
+
+    x,
+    y: z,
+    z,
+
+    width,
+    height: thickness,
+    depth: zoneDepth,
+
+    xSize: width,
+    ySize: zoneDepth,
+    zSize: thickness,
+
+    color: '#3fa9f5'
+  }
+} // End createHorizontalPanel
+
+//=================
+export function createPanelOnZoneEdge(zone, edge, thickness = 18, offsetValue = 0, panels = []) {
   if (!zone || !edge) return null
 
   const t = Math.max(1, Number(thickness || 18))
-  const minX = getZoneMinX(zone)
-  const maxX = getZoneMaxX(zone)
-  const minY = getZoneMinY(zone)
-  const maxY = getZoneMaxY(zone)
+  const offset = Math.max(0, Number(offsetValue || 0))
   const zoneWidth = getZoneWidth(zone)
   const zoneHeight = getZoneHeight(zone)
 
   if (zoneWidth <= 0 || zoneHeight <= 0) return null
 
-  let offset = Math.max(0, Number(offsetValue || 0))
-
-  if (edge === 'bottom') {
-    offset = clampNumber(offset, 0, Math.max(0, zoneHeight - t))
-
-    return {
-      ...createPanelBase(zone, edge, t, offset),
-      orientation: 'horizontal',
-      panelKind: 'horizontal',
-      x: minX,
-      y: minY + offset,
-      z: minY + offset,
-      width: zoneWidth,
-      depth: zone.depth || zoneWidth,
-      height: t,
-      color: '#3fa9f5'
-    }
+  if (edge === 'left' || edge === 'right') {
+    return createVerticalPanel(zone, edge, t, offset)
   }
 
-  if (edge === 'top') {
-    offset = clampNumber(offset, 0, Math.max(0, zoneHeight - t))
-
-    return {
-      ...createPanelBase(zone, edge, t, offset),
-      orientation: 'horizontal',
-      panelKind: 'horizontal',
-      x: minX,
-      y: maxY - t - offset,
-      z: maxY - t - offset,
-      width: zoneWidth,
-      depth: zone.depth || zoneWidth,
-      height: t,
-      color: '#3fa9f5'
-    }
-  }
-
-  if (edge === 'left') {
-    offset = clampNumber(offset, 0, Math.max(0, zoneWidth - t))
-
-    return {
-      ...createPanelBase(zone, edge, t, offset),
-      orientation: 'vertical',
-      panelKind: 'vertical',
-      x: minX + offset,
-      y: minY,
-      z: minY,
-      width: t,
-      depth: zone.depth || t,
-      height: zoneHeight,
-      color: '#e55353'
-    }
-  }
-
-  if (edge === 'right') {
-    offset = clampNumber(offset, 0, Math.max(0, zoneWidth - t))
-
-    return {
-      ...createPanelBase(zone, edge, t, offset),
-      orientation: 'vertical',
-      panelKind: 'vertical',
-      x: maxX - t - offset,
-      y: minY,
-      z: minY,
-      width: t,
-      depth: zone.depth || t,
-      height: zoneHeight,
-      color: '#e55353'
-    }
+  if (edge === 'top' || edge === 'bottom') {
+    return createHorizontalPanel(zone, edge, t, offset, panels)
   }
 
   return null
 } // End createPanelOnZoneEdge
 
 //=================
-export function splitZoneByCount(zone, edgeOrCount, countOrThickness, thicknessOrEmpty) {
+export function createPanelPreview(zone, edge, thickness = 18, offsetValue = 0, panels = []) {
+  const panel = createPanelOnZoneEdge(zone, edge, thickness, offsetValue, panels)
+
+  if (!panel) return null
+
+  return {
+    ...panel,
+    id: `${panel.id}_preview`,
+    preview: true,
+    name: panel.name
+  }
+} // End createPanelPreview
+
+//=================
+export function splitZoneByCount(zone, edgeOrCount, countOrThickness, thicknessOrPanels, panelsOrEmpty) {
   if (!zone) return []
 
   let edge = edgeOrCount
   let count = countOrThickness
-  let thickness = thicknessOrEmpty
+  let thickness = thicknessOrPanels
+  let panels = panelsOrEmpty || []
 
   if (typeof edgeOrCount === 'number') {
     edge = getZoneWidth(zone) >= getZoneHeight(zone) ? 'left' : 'bottom'
     count = edgeOrCount
     thickness = countOrThickness
+    panels = []
   }
 
   const n = Math.max(2, Math.floor(Number(count || 2)))
   const t = Math.max(1, Number(thickness || 18))
-  const panels = []
-
-  if (edge === 'bottom' || edge === 'top') {
-    const clearEach = (getZoneHeight(zone) - (n - 1) * t) / n
-
-    if (!Number.isFinite(clearEach) || clearEach <= 0) return []
-
-    for (let i = 1; i <= n - 1; i += 1) {
-      const offset = clearEach * i + t * (i - 1)
-      const panel = createPanelOnZoneEdge(zone, 'bottom', t, offset)
-
-      if (panel) {
-        panel.name = 'Tấm chia ngang'
-        panel.panelDivideCount = n
-        panel.edge = 'split'
-        panels.push(panel)
-      }
-    }
-
-    return panels
-  }
+  const result = []
 
   if (edge === 'left' || edge === 'right') {
     const clearEach = (getZoneWidth(zone) - (n - 1) * t) / n
@@ -213,21 +282,56 @@ export function splitZoneByCount(zone, edgeOrCount, countOrThickness, thicknessO
 
     for (let i = 1; i <= n - 1; i += 1) {
       const offset = clearEach * i + t * (i - 1)
-      const panel = createPanelOnZoneEdge(zone, 'left', t, offset)
+      const panel = createPanelOnZoneEdge(zone, 'left', t, offset, panels)
 
-      if (panel) {
-        panel.name = 'Tấm chia đứng'
-        panel.panelDivideCount = n
-        panel.edge = 'split'
-        panels.push(panel)
-      }
+      if (!panel) continue
+
+      result.push({
+        ...panel,
+        name: 'Tấm chia đứng',
+        edge: 'split',
+        panelSide: 'split_vertical',
+        panelDivideCount: n
+      })
     }
 
-    return panels
+    return result
   }
 
-  return panels
+  if (edge === 'top' || edge === 'bottom') {
+    const clearEach = (getZoneHeight(zone) - (n - 1) * t) / n
+
+    if (!Number.isFinite(clearEach) || clearEach <= 0) return []
+
+    for (let i = 1; i <= n - 1; i += 1) {
+      const offset = clearEach * i + t * (i - 1)
+      const panel = createPanelOnZoneEdge(zone, 'bottom', t, offset, panels)
+
+      if (!panel) continue
+
+      result.push({
+        ...panel,
+        name: 'Tấm chia ngang',
+        edge: 'split',
+        panelSide: 'split_horizontal',
+        panelDivideCount: n
+      })
+    }
+
+    return result
+  }
+
+  return result
 } // End splitZoneByCount
+
+//=================
+export function createSplitPreview(zone, edge, count, thickness = 18, panels = []) {
+  return splitZoneByCount(zone, edge, count, thickness, panels).map((panel) => ({
+    ...panel,
+    id: `${panel.id}_preview`,
+    preview: true
+  }))
+} // End createSplitPreview
 
 //=================
 export function movePanelByDelta(panel, dx, dy, lockAxis = false) {
@@ -243,11 +347,12 @@ export function movePanelByDelta(panel, dx, dy, lockAxis = false) {
   }
 
   const nextY = Number(panel.y || 0) + moveY
+  const nextZ = Number(panel.z ?? panel.y ?? 0) + moveY
 
   return {
     ...panel,
     x: Number(panel.x || 0) + moveX,
     y: nextY,
-    z: nextY
+    z: nextZ
   }
 } // End movePanelByDelta

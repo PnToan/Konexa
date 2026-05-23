@@ -1,9 +1,18 @@
 import { createSimpleStore } from './createStore'
 import { useAppStore } from './useAppStore'
+import { useCabinetStore } from './useCabinetStore'
 import { useBoxStore } from './useBoxStore'
 import { buildZones } from '../core/zone/zone-engine'
-import { createPanelOnZoneEdge, splitZoneByCount, movePanelByDelta } from '../core/panel/panel-engine'
+import {
+  createPanelOnZoneEdge,
+  createPanelPreview,
+  createSplitPreview,
+  splitZoneByCount,
+  movePanelByDelta
+} from '../core/panel/panel-engine'
 import { projectBoxToCameraRect } from '../core/view/view-camera'
+
+let panelInputTimer = null
 
 const store = createSimpleStore({
   panels: [],
@@ -11,7 +20,11 @@ const store = createSimpleStore({
   hover: null,
   snapPreview: null,
   selectedPanelId: null,
+
   panelInputBuffer: '',
+  panelPreviewBuffer: '',
+  panelPreviewVersion: 0,
+
   drag: {
     active: false,
     panelId: null,
@@ -20,15 +33,34 @@ const store = createSimpleStore({
   }
 }, (state) => ({
   //=================
+  isPanelToolAllowed() {
+    const app = useAppStore()
+
+    return app.state.currentTool === 'panel' && app.state.currentView === 'front'
+  }, // End isPanelToolAllowed
+
+  //=================
+  getPanelThickness() {
+    const cabinet = useCabinetStore()
+
+    return Number(cabinet.state.panelThickness || 18)
+  }, // End getPanelThickness
+
+  //=================
   rebuildZones() {
     const app = useAppStore()
     const box = useBoxStore()
-    const currentView = app.state.currentView
+
+    if (app.state.currentView !== 'front') {
+      state.zones = []
+      state.hover = null
+      return
+    }
 
     const allZones = []
 
     box.state.boxes.forEach((baseBox) => {
-      const rect = projectBoxToCameraRect(baseBox, currentView)
+      const rect = projectBoxToCameraRect(baseBox, 'front')
 
       const baseRect = {
         ...rect,
@@ -36,14 +68,16 @@ const store = createSimpleStore({
         name: baseBox.name,
         frameId: baseBox.id,
         linkedFrameId: baseBox.id,
-        baseObjectId: baseBox.id,
         sourceBoxId: baseBox.id,
+        baseObjectId: baseBox.id,
         depth: baseBox.depth,
-        source: baseBox
+        source: baseBox,
+        baseObject: baseBox
       }
 
       const panelsInBox = state.panels.filter((panel) => {
         return panel.linkedFrameId === baseBox.id ||
+          panel.frameId === baseBox.id ||
           panel.sourceBoxId === baseBox.id ||
           panel.baseObjectId === baseBox.id
       })
@@ -52,10 +86,11 @@ const store = createSimpleStore({
         ...zone,
         frameId: baseBox.id,
         linkedFrameId: baseBox.id,
-        baseObjectId: baseBox.id,
         sourceBoxId: baseBox.id,
-        baseObject: baseBox,
-        depth: baseBox.depth
+        baseObjectId: baseBox.id,
+        depth: baseBox.depth,
+        sourceBox: baseBox,
+        baseObject: baseBox
       }))
 
       allZones.push(...zones)
@@ -66,6 +101,11 @@ const store = createSimpleStore({
 
   //=================
   setHover(hit) {
+    if (!this.isPanelToolAllowed() && hit?.type === 'zone-edge') {
+      state.hover = null
+      return
+    }
+
     state.hover = hit
   }, // End setHover
 
@@ -90,31 +130,57 @@ const store = createSimpleStore({
   }, // End clearSelection
 
   //=================
+  schedulePanelPreviewUpdate() {
+    if (panelInputTimer) {
+      clearTimeout(panelInputTimer)
+      panelInputTimer = null
+    }
+
+    panelInputTimer = setTimeout(() => {
+      state.panelPreviewBuffer = state.panelInputBuffer
+      state.panelPreviewVersion += 1
+      panelInputTimer = null
+    }, 1000)
+  }, // End schedulePanelPreviewUpdate
+
+  //=================
   clearPanelInput() {
+    if (panelInputTimer) {
+      clearTimeout(panelInputTimer)
+      panelInputTimer = null
+    }
+
     state.panelInputBuffer = ''
+    state.panelPreviewBuffer = ''
+    state.panelPreviewVersion += 1
   }, // End clearPanelInput
 
   //=================
   appendPanelInput(key) {
     if (key === '/') {
       if (state.panelInputBuffer.startsWith('/')) return
+
       state.panelInputBuffer = `/${state.panelInputBuffer}`
+      this.schedulePanelPreviewUpdate()
       return
     }
 
     if (/^[0-9]$/.test(key)) {
       state.panelInputBuffer += key
+      this.schedulePanelPreviewUpdate()
     }
   }, // End appendPanelInput
 
   //=================
   backspacePanelInput() {
     state.panelInputBuffer = state.panelInputBuffer.slice(0, -1)
+    this.schedulePanelPreviewUpdate()
   }, // End backspacePanelInput
 
   //=================
-  getPanelInputMode() {
-    const buffer = String(state.panelInputBuffer || '').trim()
+  getPanelInputMode(usePreviewBuffer = false) {
+    const rawBuffer = usePreviewBuffer ? state.panelPreviewBuffer : state.panelInputBuffer
+    const buffer = String(rawBuffer || '').trim()
 
     if (buffer === '') {
       return {
@@ -141,27 +207,55 @@ const store = createSimpleStore({
   }, // End getPanelInputMode
 
   //=================
-  getPanelPreview() {
-    if (!state.hover || state.hover.type !== 'zone-edge') return null
+  getPanelPreviewItems() {
+    if (!this.isPanelToolAllowed()) return []
+    if (!state.hover || state.hover.type !== 'zone-edge') return []
 
-    const input = this.getPanelInputMode()
+    const input = this.getPanelInputMode(true)
+    const thickness = this.getPanelThickness()
 
-    if (input.mode !== 'offset') return null
+    if (input.mode === 'divide') {
+      if (!input.value) return []
 
-    return createPanelOnZoneEdge(
+      return createSplitPreview(
+        state.hover.zone,
+        state.hover.edge,
+        input.value,
+        thickness,
+        state.panels
+      )
+    }
+
+    const panel = createPanelPreview(
       state.hover.zone,
       state.hover.edge,
-      useBoxStore().state.panelThickness || 18,
-      input.value
+      thickness,
+      input.value,
+      state.panels
     )
-  }, // End getPanelPreview
+
+    return panel ? [panel] : []
+  }, // End getPanelPreviewItems
 
   //=================
   addPanelFromHover() {
+    if (!this.isPanelToolAllowed()) {
+      useAppStore().setStatus('Vẽ Tấm chỉ hoạt động ở mặt Trước')
+      return null
+    }
+
     if (!state.hover || state.hover.type !== 'zone-edge') return null
 
-    const input = this.getPanelInputMode()
-    const thickness = 18
+    if (panelInputTimer) {
+      clearTimeout(panelInputTimer)
+      panelInputTimer = null
+    }
+
+    state.panelPreviewBuffer = state.panelInputBuffer
+    state.panelPreviewVersion += 1
+
+    const input = this.getPanelInputMode(false)
+    const thickness = this.getPanelThickness()
 
     if (input.mode === 'divide') {
       if (!input.value) return null
@@ -170,14 +264,15 @@ const store = createSimpleStore({
         state.hover.zone,
         state.hover.edge,
         input.value,
-        thickness
+        thickness,
+        state.panels
       )
 
       state.panels.push(...panels)
 
       if (panels[0]) state.selectedPanelId = panels[0].id
 
-      state.panelInputBuffer = ''
+      this.clearPanelInput()
       this.rebuildZones()
       useAppStore().setStatus(`Đã chia zone /${input.value}`)
 
@@ -188,15 +283,16 @@ const store = createSimpleStore({
       state.hover.zone,
       state.hover.edge,
       thickness,
-      input.value
+      input.value,
+      state.panels
     )
 
     if (!panel) return null
 
     state.panels.push(panel)
     state.selectedPanelId = panel.id
-    state.panelInputBuffer = ''
 
+    this.clearPanelInput()
     this.rebuildZones()
     useAppStore().setStatus(`Đã tạo ${panel.name}`)
 
@@ -205,9 +301,16 @@ const store = createSimpleStore({
 
   //=================
   splitHoveredZone(count) {
+    if (!this.isPanelToolAllowed()) return []
     if (!state.hover || state.hover.type !== 'zone-edge') return []
 
-    const panels = splitZoneByCount(state.hover.zone, state.hover.edge, count, 18)
+    const panels = splitZoneByCount(
+      state.hover.zone,
+      state.hover.edge,
+      count,
+      this.getPanelThickness(),
+      state.panels
+    )
 
     state.panels.push(...panels)
 

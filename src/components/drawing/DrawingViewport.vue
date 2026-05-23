@@ -128,6 +128,7 @@ function draw() {
     wallEditingDim: wall.state.editingDim,
     zones: drawing.state.zones,
     panels: drawing.state.panels,
+    panels: drawing.state.panels,
     boxes: box.state.boxes,
     boxDraftRect: box.getDraftRect(),
     boxEditingDim: box.state.editingDim,
@@ -320,14 +321,21 @@ function hitTestMoveGrip(local) {
   return null
 } // End hitTestMoveGrip
 //=================
-
 function updateHover(local) {
   const scale = app.state.viewport.localScale * app.state.viewport.zoom
   const toleranceLocal = 18 / scale
 
   if (app.state.currentTool === 'panel') {
+    if (app.state.currentView !== 'front') {
+      drawing.setHover(null)
+      app.setStatus('Vẽ Tấm chỉ hoạt động ở mặt Trước')
+      return
+    }
+
     const zoneHit = hitTestZoneEdge(drawing.state.zones, local, toleranceLocal)
+
     drawing.setHover(zoneHit)
+    draw()
     return
   }
 
@@ -339,6 +347,7 @@ function updateHover(local) {
   }
 
   const zoneHit = hitTestZoneEdge(drawing.state.zones, local, toleranceLocal)
+
   drawing.setHover(zoneHit)
 } // End updateHover
 //=================
@@ -575,11 +584,24 @@ function onPointerDown(event) {
   if (app.state.currentTool === 'panel') {
     updateHover(local)
 
+  if (app.state.currentTool === 'panel') {
+    if (app.state.currentView !== 'front') {
+      app.setStatus('Vẽ Tấm chỉ hoạt động ở mặt Trước')
+      draw()
+      return
+    }
+
+    updateHover(rawLocal)
+
     if (drawing.state.hover?.type === 'zone-edge') {
       drawing.addPanelFromHover()
       draw()
       return
     }
+
+    draw()
+    return
+  }
   }
   if (app.state.currentTool === 'move' && gripHit) {
     drawing.selectPanel(gripHit.panel.id)
@@ -685,13 +707,21 @@ function onWheel(event) {
   draw()
 }
 //=================
-//=================
 function onKeyDown(event) {
   if (dimInput.value.active) return
 
   const key = event.key
 
   if (app.state.currentTool === 'panel') {
+    if (app.state.currentView !== 'front') {
+      if (key === 'Escape') {
+        app.setTool('select')
+        draw()
+      }
+
+      return
+    }
+
     if (/^[0-9]$/.test(key)) {
       event.preventDefault()
       drawing.appendPanelInput(key)
@@ -744,9 +774,19 @@ function onKeyDown(event) {
 } // End onKeyDown
 
 watch(() => [cabinet.state.width, cabinet.state.depth, cabinet.state.height, cabinet.state.panelThickness, app.state.currentView], () => {
+  drawing.rebuildZones()
   draw()
 })
-watch(() => [drawing.state.panels.length, drawing.state.zones.length, drawing.state.selectedPanelId, app.state.mini3DVisible], draw)
+
+watch(() => [
+  drawing.state.panels.length,
+  drawing.state.zones.length,
+  drawing.state.selectedPanelId,
+  drawing.state.panelPreviewVersion,
+  drawing.state.panelInputBuffer,
+  app.state.mini3DVisible
+], draw)
+
 watch(() => [box.state.boxes.length, box.state.selectedBoxId, box.state.editingDim, box.state.draft.active], () => {
   drawing.rebuildZones()
   draw()
