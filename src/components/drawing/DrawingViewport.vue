@@ -115,8 +115,9 @@ function resizeCanvas() {
 function draw() {
   if (!ctx || !canvasRef.value) return
 
-  const viewport = app.state.viewport
-  const wallRect = projectBoxToCameraRect(getWallBox3D(), app.state.currentView)
+  const canvas = canvasRef.value
+  const width = canvas.clientWidth
+  const height = canvas.clientHeight
 
   renderCanvas2D(ctx, {
     width,
@@ -125,7 +126,7 @@ function draw() {
     currentView: app.state.currentView,
     wallRect: projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
     wallEditingDim: wall.state.editingDim,
-    zones: drawing.getZones(),
+    zones: drawing.state.zones,
     panels: drawing.state.panels,
     boxes: box.state.boxes,
     boxDraftRect: box.getDraftRect(),
@@ -478,7 +479,8 @@ function onPointerMove(event) {
     app.state.currentView
   )
   hoverDim.value = boxDimHit || wallDimHit
-    if (app.state.currentTool === 'box' && box.state.draft.active) {
+
+  if (app.state.currentTool === 'box' && box.state.draft.active) {
     box.updateDraft(local)
     draw()
     return
