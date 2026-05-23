@@ -66,7 +66,6 @@ function getZoneDepth(zone) {
 
   return toNumber(
     zone.depth ??
-    zone.ySize ??
     sourceBox?.depth ??
     sourceBox?.ySize,
     0
@@ -84,6 +83,18 @@ function getFrameId(zone) {
     zone.source?.id ||
     null
 } // End getFrameId
+
+//=================
+function getBoxY3d(zone) {
+  const sourceBox = zone.sourceBox || zone.baseObject || zone.source
+
+  return toNumber(
+    sourceBox?.y3d ??
+    sourceBox?.y ??
+    sourceBox?.depthY,
+    0
+  )
+} // End getBoxY3d
 
 //=================
 function createPanelBase(zone, edge, thickness, offset) {
@@ -126,6 +137,21 @@ function createPanelBase(zone, edge, thickness, offset) {
 } // End createPanelBase
 
 //=================
+function withFrontRect(panel) {
+  return {
+    ...panel,
+
+    x: panel.x3d,
+    y: panel.z3d,
+    z: panel.z3d,
+
+    width: panel.xSize,
+    height: panel.zSize,
+    depth: panel.ySize
+  }
+} // End withFrontRect
+
+//=================
 function createSidePanel(zone, edge, thickness, offset) {
   const minX = getZoneMinX(zone)
   const maxX = getZoneMaxX(zone)
@@ -133,32 +159,29 @@ function createSidePanel(zone, edge, thickness, offset) {
   const zoneWidth = getZoneWidth(zone)
   const zoneHeight = getZoneHeight(zone)
   const zoneDepth = getZoneDepth(zone)
+  const y3d = getBoxY3d(zone)
   const safeOffset = clampNumber(offset, 0, Math.max(0, zoneWidth - thickness))
 
-  const x = edge === 'left'
+  const x3d = edge === 'left'
     ? minX + safeOffset
     : maxX - thickness - safeOffset
 
-  return {
+  return withFrontRect({
     ...createPanelBase(zone, edge, thickness, safeOffset),
 
     orientation: 'vertical',
     panelKind: 'side',
 
-    x,
-    y: minZ,
-    z: minZ,
-
-    width: thickness,
-    height: zoneHeight,
-    depth: zoneDepth,
+    x3d,
+    y3d,
+    z3d: minZ,
 
     xSize: thickness,
     ySize: zoneDepth,
     zSize: zoneHeight,
 
-    color: '#c62828'
-  }
+    color: '#0040a0'
+  })
 } // End createSidePanel
 
 //=================
@@ -169,32 +192,29 @@ function createTopBottomPanel(zone, edge, thickness, offset) {
   const zoneWidth = getZoneWidth(zone)
   const zoneHeight = getZoneHeight(zone)
   const zoneDepth = getZoneDepth(zone)
+  const y3d = getBoxY3d(zone)
   const safeOffset = clampNumber(offset, 0, Math.max(0, zoneHeight - thickness))
 
-  const z = edge === 'bottom'
+  const z3d = edge === 'bottom'
     ? minZ + safeOffset
     : maxZ - thickness - safeOffset
 
-  return {
+  return withFrontRect({
     ...createPanelBase(zone, edge, thickness, safeOffset),
 
     orientation: 'horizontal',
     panelKind: 'top_bottom',
 
-    x: minX,
-    y: z,
-    z,
-
-    width: zoneWidth,
-    height: thickness,
-    depth: zoneDepth,
+    x3d: minX,
+    y3d,
+    z3d,
 
     xSize: zoneWidth,
     ySize: zoneDepth,
     zSize: thickness,
 
-    color: '#0b63c7'
-  }
+    color: '#0040a0'
+  })
 } // End createTopBottomPanel
 
 //=================
@@ -321,13 +341,9 @@ export function movePanelByDelta(panel, dx, dy, lockAxis = false) {
     }
   }
 
-  const nextY = toNumber(panel.y, 0) + moveY
-  const nextZ = toNumber(panel.z ?? panel.y, 0) + moveY
-
-  return {
+  return withFrontRect({
     ...panel,
-    x: toNumber(panel.x, 0) + moveX,
-    y: nextY,
-    z: nextZ
-  }
+    x3d: toNumber(panel.x3d, panel.x) + moveX,
+    z3d: toNumber(panel.z3d, panel.z ?? panel.y) + moveY
+  })
 } // End movePanelByDelta

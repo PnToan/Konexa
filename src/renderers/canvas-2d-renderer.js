@@ -1,5 +1,5 @@
 import { localToScreen, getLocalScale } from './viewport-transform'
-import { projectBoxToCameraRect } from '../core/view/view-camera'
+import { projectBoxToCameraRect, getCameraConfig } from '../core/view/view-camera'
 
 //=================
 function drawLine(ctx, a, b, color = '#999', width = 1) {
@@ -289,21 +289,54 @@ function drawPanelGrip(ctx, viewport, point, active = false) {
 } // End drawPanelGrip
 
 //=================
-function getPanelRect(panel) {
+function getPanelAxisMin(panel, axis) {
+  if (axis === 'x') return Number(panel.x || 0)
+  if (axis === 'y') return Number((panel.y3d ?? panel.worldY ?? panel.depthY ?? panel.y) || 0)
+  if (axis === 'z') return Number(panel.z ?? panel.y ?? 0)
+
+  return 0
+} // End getPanelAxisMin
+
+//=================
+function getPanelAxisSize(panel, axis) {
+  if (axis === 'x') return Number(panel.xSize ?? panel.width ?? 0)
+  if (axis === 'y') return Number(panel.ySize ?? panel.depth ?? 0)
+  if (axis === 'z') return Number(panel.zSize ?? panel.height ?? panel.thickness ?? 0)
+
+  return 0
+} // End getPanelAxisSize
+
+//=================
+function projectPanelAxisValue(value, size, reverse) {
+  if (reverse) return -(value + size)
+
+  return value
+} // End projectPanelAxisValue
+
+//=================
+function getPanelRect(panel, currentView = 'front') {
   if (!panel) return null
 
+  const camera = getCameraConfig(currentView)
+  const uMin = getPanelAxisMin(panel, camera.axisU)
+  const vMin = getPanelAxisMin(panel, camera.axisV)
+  const uSize = getPanelAxisSize(panel, camera.axisU)
+  const vSize = getPanelAxisSize(panel, camera.axisV)
+
+  if (uSize <= 0 || vSize <= 0) return null
+
   return {
-    x: panel.x,
-    y: panel.y,
-    width: panel.width,
-    height: panel.height || panel.depth || panel.thickness || 18
+    x: projectPanelAxisValue(uMin, uSize, camera.reverseU),
+    y: projectPanelAxisValue(vMin, vSize, camera.reverseV),
+    width: uSize,
+    height: vSize
   }
 } // End getPanelRect
 
 //=================
-function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
+function drawPanels(ctx, viewport, panels = [], selectedPanelId, currentView = 'front') {
   panels.forEach((panel) => {
-    const rect = getPanelRect(panel)
+    const rect = getPanelRect(panel, currentView)
 
     if (!rect) return
 
@@ -325,43 +358,82 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
 } // End drawPanels
 
 //=================
-function drawPanelPreviewItems(ctx, viewport, previewItems = []) {
+function drawPanelPreviewItems(ctx, viewport, previewItems = [], hover, currentView = 'front') {
   if (!Array.isArray(previewItems) || previewItems.length === 0) return
+
+  const firstPreview = previewItems[0]
+  const isDividePreview = firstPreview.panelDivideCount && hover?.zone
 
   ctx.save()
   ctx.setLineDash([8, 5])
 
   previewItems.forEach((panel) => {
-    const rect = getPanelRect(panel)
+    const rect = getPanelRect(panel, currentView)
 
     if (!rect) return
 
     drawRectLocal(ctx, viewport, rect, {
-      fill: 'rgba(255, 47, 146, 0.22)',
-      stroke: '#ff2f92',
+      fill: 'rgba(0, 64, 160, 0.55)',
+      stroke: '#002f78',
       lineWidth: 2
     })
-
-    const center = localToScreen(viewport, rect.x + rect.width / 2, rect.y + rect.height / 2)
-
-    ctx.setLineDash([])
-    ctx.font = '12px Arial'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(panel.name || 'Preview', center.x, center.y)
-
-    ctx.font = '10px Arial'
-    ctx.fillText(
-      `${Math.round(panel.xSize || panel.width)} x ${Math.round(panel.ySize || panel.depth || 0)} x ${Math.round(panel.zSize || panel.height)}`,
-      center.x,
-      center.y + 15
-    )
-
-    ctx.setLineDash([8, 5])
   })
 
   ctx.restore()
+
+  if (isDividePreview) {
+    drawDivideClearPreview(ctx, viewport, hover.zone, previewItems)
+  }
 } // End drawPanelPreviewItems
+//=================
+function drawDivideClearPreview(ctx, viewport, zone, previewItems = []) {
+  if (!zone || !Array.isArray(previewItems) || previewItems.length === 0) return
+
+  const firstPreview = previewItems[0]
+  const divideCount = Number(firstPreview.panelDivideCount || 0)
+  const thickness = Number(firstPreview.thickness || firstPreview.panelThickness || 18)
+
+  if (!Number.isFinite(divideCount) || divideCount < 2) return
+
+  const isVerticalDivide = firstPreview.panelSide === 'split_vertical'
+  const zoneX = Number(zone.x || 0)
+  const zoneY = Number(zone.y || 0)
+  const zoneWidth = Number(zone.width || 0)
+  const zoneHeight = Number(zone.height || 0)
+
+  if (zoneWidth <= 0 || zoneHeight <= 0) return
+
+  const clearSize = isVerticalDivide
+    ? (zoneWidth - (divideCount - 1) * thickness) / divideCount
+    : (zoneHeight - (divideCount - 1) * thickness) / divideCount
+
+  if (!Number.isFinite(clearSize) || clearSize <= 0) return
+
+  ctx.save()
+
+  ctx.fillStyle = '#111111'
+  ctx.font = '13px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  for (let i = 0; i < divideCount; i += 1) {
+    let labelX = zoneX + zoneWidth / 2
+    let labelY = zoneY + zoneHeight / 2
+
+    if (isVerticalDivide) {
+      labelX = zoneX + clearSize / 2 + i * (clearSize + thickness)
+    } else {
+      labelY = zoneY + clearSize / 2 + i * (clearSize + thickness)
+    }
+
+    const screen = localToScreen(viewport, labelX, labelY)
+
+    ctx.fillText(String(Math.round(clearSize)), screen.x, screen.y)
+  }
+
+  ctx.restore()
+} // End drawDivideClearPreview
+
 //=================
 function drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer) {
   if (!hover || hover.type !== 'zone-edge') return
@@ -641,8 +713,8 @@ export function renderCanvas2D(ctx, payload) {
   drawBoxes(ctx, viewport, boxes, selectedBoxId, boxEditingDim, currentView)
   drawBoxDraft(ctx, viewport, boxDraftRect, currentView)
   drawZoneOverlay(ctx, viewport, zones, hover)
-  drawPanels(ctx, viewport, panels, selectedPanelId)
-  drawPanelPreviewItems(ctx, viewport, panelPreviewItems)
+  drawPanels(ctx, viewport, panels, selectedPanelId, currentView)
+  drawPanelPreviewItems(ctx, viewport, panelPreviewItems, hover, currentView)
   drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer)
   drawSnapPreview(ctx, viewport, snapPreview)
   drawRulers(ctx, viewport, width, height)
