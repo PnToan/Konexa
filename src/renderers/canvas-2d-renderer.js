@@ -136,7 +136,6 @@ function drawWallHatch(ctx, viewport, rect) {
   const h = Math.abs(p2.y - p1.y)
 
   ctx.save()
-
   ctx.beginPath()
   ctx.rect(x, y, w, h)
   ctx.clip()
@@ -188,7 +187,6 @@ function drawWallDims(ctx, viewport, wallRect, editingDim) {
 
   drawLine(ctx, { x: leftTop.x, y: topDimY - 6 }, { x: leftTop.x, y: topDimY + 6 }, widthColor, 2)
   drawLine(ctx, { x: rightTop.x, y: topDimY - 6 }, { x: rightTop.x, y: topDimY + 6 }, widthColor, 2)
-
   drawLine(ctx, { x: leftDimX - 6, y: leftTop.y }, { x: leftDimX + 6, y: leftTop.y }, heightColor, 2)
   drawLine(ctx, { x: leftDimX - 6, y: leftBottom.y }, { x: leftDimX + 6, y: leftBottom.y }, heightColor, 2)
 
@@ -223,7 +221,6 @@ function hitTestWallDim(viewport, wallRect, screenX, screenY) {
 
   const widthTextX = (leftTop.x + rightTop.x) / 2
   const widthTextY = topDimY - 12
-
   const heightTextX = leftDimX - 16
   const heightTextY = (leftTop.y + leftBottom.y) / 2
 
@@ -279,6 +276,66 @@ function drawZoneOverlay(ctx, viewport, zones = [], hover) {
     drawLine(ctx, a, b, '#ff9f1a', 4)
   }
 } // End drawZoneOverlay
+
+//=================
+function drawPanelGrip(ctx, viewport, point, active = false) {
+  const screenPoint = localToScreen(viewport, point.x, point.y)
+
+  ctx.save()
+  ctx.fillStyle = active ? '#ff9f1a' : '#ffffff'
+  ctx.strokeStyle = '#0077CC'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(screenPoint.x, screenPoint.y, 4, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  ctx.restore()
+} // End drawPanelGrip
+
+//=================
+function getPanelRect(panel) {
+  if (!panel) return null
+
+  return {
+    x: panel.x,
+    y: panel.y,
+    width: panel.width,
+    height: panel.height || panel.depth || panel.thickness || 18
+  }
+} // End getPanelRect
+
+//=================
+function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
+  panels.forEach((panel) => {
+    const rect = getPanelRect(panel)
+
+    if (!rect) return
+
+    const selected = panel.id === selectedPanelId
+
+    drawRectLocal(ctx, viewport, rect, {
+      fill: selected ? 'rgba(0, 119, 204, 0.18)' : 'rgba(0, 119, 204, 0.10)',
+      stroke: selected ? '#0077CC' : 'rgba(0, 119, 204, 0.65)',
+      lineWidth: selected ? 2 : 1
+    })
+
+    const center = localToScreen(viewport, rect.x + rect.width / 2, rect.y + rect.height / 2)
+
+    ctx.fillStyle = '#0077CC'
+    ctx.font = '11px Arial'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(panel.name || 'Tấm', center.x, center.y)
+
+    if (!selected) return
+
+    drawPanelGrip(ctx, viewport, { x: rect.x, y: rect.y })
+    drawPanelGrip(ctx, viewport, { x: rect.x + rect.width, y: rect.y })
+    drawPanelGrip(ctx, viewport, { x: rect.x + rect.width, y: rect.y + rect.height })
+    drawPanelGrip(ctx, viewport, { x: rect.x, y: rect.y + rect.height })
+  })
+} // End drawPanels
+
 //=================
 function drawSnapPreview(ctx, viewport, snapPreview) {
   if (!snapPreview) return
@@ -308,6 +365,28 @@ function drawSnapPreview(ctx, viewport, snapPreview) {
 
   ctx.restore()
 } // End drawSnapPreview
+
+//=================
+function getBoxViewDimKeys(currentView = 'top') {
+  if (currentView === 'front' || currentView === 'back') {
+    return {
+      horizontal: 'width',
+      vertical: 'height'
+    }
+  }
+
+  if (currentView === 'left' || currentView === 'right') {
+    return {
+      horizontal: 'depth',
+      vertical: 'height'
+    }
+  }
+
+  return {
+    horizontal: 'width',
+    vertical: 'depth'
+  }
+} // End getBoxViewDimKeys
 
 //=================
 function drawBoxDims(ctx, viewport, box, editingDim, currentView = 'top') {
@@ -351,27 +430,7 @@ function drawBoxDims(ctx, viewport, box, editingDim, currentView = 'top') {
     ctx.restore()
   }
 } // End drawBoxDims
-//=================
-function getBoxViewDimKeys(currentView = 'top') {
-  if (currentView === 'front' || currentView === 'back') {
-    return {
-      horizontal: 'width',
-      vertical: 'height'
-    }
-  }
 
-  if (currentView === 'left' || currentView === 'right') {
-    return {
-      horizontal: 'depth',
-      vertical: 'height'
-    }
-  }
-
-  return {
-    horizontal: 'width',
-    vertical: 'depth'
-  }
-} // End getBoxViewDimKeys
 //=================
 function drawBoxes(ctx, viewport, boxes = [], selectedBoxId, editingDim, currentView = 'top') {
   boxes.forEach((box) => {
@@ -416,6 +475,7 @@ function drawBoxDraft(ctx, viewport, draftRect, currentView = 'top') {
     lineWidth: 2
   })
 } // End drawBoxDraft
+
 //=================
 function hitTestBoxDim(viewport, boxes = [], screenX, screenY, currentView = 'top') {
   const viewDim = getBoxViewDimKeys(currentView)
@@ -485,6 +545,7 @@ function hitTestBoxDim(viewport, boxes = [], screenX, screenY, currentView = 'to
 
   return null
 } // End hitTestBoxDim
+
 //=================
 export function getWallDimHit(viewport, wallRect, screenX, screenY) {
   return hitTestWallDim(viewport, wallRect, screenX, screenY)
@@ -494,6 +555,7 @@ export function getWallDimHit(viewport, wallRect, screenX, screenY) {
 export function getBoxDimHit(viewport, boxes, screenX, screenY, currentView = 'top') {
   return hitTestBoxDim(viewport, boxes, screenX, screenY, currentView)
 } // End getBoxDimHit
+
 //=================
 export function renderCanvas2D(ctx, payload) {
   const {

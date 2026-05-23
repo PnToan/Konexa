@@ -43,7 +43,7 @@ import { useBoxStore } from '../../stores/useBoxStore'
 import { renderCanvas2D, getWallDimHit, getBoxDimHit } from '../../renderers/canvas-2d-renderer'
 import { screenToLocal, localToScreen } from '../../renderers/viewport-transform'
 import { projectBoxToCameraRect, cameraLocalToWorldPoint } from '../../core/view/view-camera'
-import { createMoveSnapResult, createWallSnapResult, getPanelSnapPoints, hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
+import { createMoveSnapResult, getPanelSnapPoints, hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
 import { handleViewportKey } from '../../commands/keyboard-controller'
 
 const app = useAppStore()
@@ -139,18 +139,142 @@ function draw() {
   })
 } // End draw
 //=================
+function clampValue(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+} // End clampValue
+
+//=================
+function getDistance(a, b) {
+  const dx = a.x - b.x
+  const dy = a.y - b.y
+
+  return Math.sqrt(dx * dx + dy * dy)
+} // End getDistance
+
+//=================
+function getWallSnapResult(local, wallRect, tolerance) {
+  if (!local || !wallRect) {
+    return {
+      active: false,
+      point: local,
+      snap: null
+    }
+  }
+
+  const left = wallRect.x
+  const right = wallRect.x + wallRect.width
+  const bottom = wallRect.y
+  const top = wallRect.y + wallRect.height
+
+  const corners = [
+    { type: 'corner', key: 'bottom-left', x: left, y: bottom },
+    { type: 'corner', key: 'bottom-right', x: right, y: bottom },
+    { type: 'corner', key: 'top-right', x: right, y: top },
+    { type: 'corner', key: 'top-left', x: left, y: top }
+  ]
+
+  let bestCorner = null
+
+  corners.forEach((target) => {
+    const distance = getDistance(local, target)
+
+    if (distance > tolerance) return
+    if (bestCorner && distance >= bestCorner.distance) return
+
+    bestCorner = {
+      ...target,
+      distance
+    }
+  })
+
+  if (bestCorner) {
+    return {
+      active: true,
+      point: {
+        x: bestCorner.x,
+        y: bestCorner.y
+      },
+      snap: bestCorner
+    }
+  }
+
+  const edges = [
+    {
+      type: 'edge',
+      key: 'bottom',
+      x: clampValue(local.x, left, right),
+      y: bottom
+    },
+    {
+      type: 'edge',
+      key: 'top',
+      x: clampValue(local.x, left, right),
+      y: top
+    },
+    {
+      type: 'edge',
+      key: 'left',
+      x: left,
+      y: clampValue(local.y, bottom, top)
+    },
+    {
+      type: 'edge',
+      key: 'right',
+      x: right,
+      y: clampValue(local.y, bottom, top)
+    }
+  ]
+
+  let bestEdge = null
+
+  edges.forEach((target) => {
+    const distance = getDistance(local, target)
+
+    if (distance > tolerance) return
+    if (bestEdge && distance >= bestEdge.distance) return
+
+    bestEdge = {
+      ...target,
+      distance
+    }
+  })
+
+  if (!bestEdge) {
+    return {
+      active: false,
+      point: local,
+      snap: null
+    }
+  }
+
+  return {
+    active: true,
+    point: {
+      x: bestEdge.x,
+      y: bestEdge.y
+    },
+    snap: bestEdge
+  }
+} // End getWallSnapResult
+
+//=================
 function getBoxSnapLocal(local) {
   if (app.state.currentTool !== 'box') return local
-  if (app.state.currentView !== 'top') return local
+
+  if (app.state.currentView !== 'top') {
+    drawing.clearSnapPreview()
+    return local
+  }
 
   const wallRect = projectBoxToCameraRect(getWallBox3D(), app.state.currentView)
   const tolerance = 18 / (app.state.viewport.localScale * app.state.viewport.zoom)
-  const snapResult = createWallSnapResult(local, wallRect, tolerance)
+  const snapResult = getWallSnapResult(local, wallRect, tolerance)
 
   drawing.setSnapPreview(snapResult.active ? snapResult.snap : null)
 
   return snapResult.point
 } // End getBoxSnapLocal
+
 //=================
 function localFromEvent(event) {
   const rect = canvasRef.value.getBoundingClientRect()
@@ -353,7 +477,6 @@ function openDimInput(dimHit) {
   })
   draw()
 } // End openDimInput
-
 //=================
 function cancelDimInput() {
   dimInput.value.active = false
@@ -361,7 +484,6 @@ function cancelDimInput() {
   box.clearEditingDim()
   draw()
 } // End cancelDimInput
-
 //=================
 function commitDimInput() {
   const numberValue = Number(dimInput.value.value)
@@ -381,7 +503,6 @@ function commitDimInput() {
   box.clearEditingDim()
   draw()
 } // End commitDimInput
-
 //=================
 function onDimInputKeyDown(event) {
   if (event.key === 'Enter') {
@@ -499,21 +620,21 @@ function onPointerMove(event) {
 
   hoverDim.value = boxDimHit || wallDimHit
 
+  if (panning && panStart && panOriginal) {
+    app.setPan(
+      panOriginal.x + event.clientX - panStart.x,
+      panOriginal.y + event.clientY - panStart.y
+    )
+    draw()
+    return
+  }
+
   if (app.state.currentTool === 'box') {
     if (box.state.draft.active) {
       box.updateDraft(local)
     }
 
     updateHover(rawLocal)
-    draw()
-    return
-  }
-
-  if (panning && panStart && panOriginal) {
-    app.setPan(
-      panOriginal.x + event.clientX - panStart.x,
-      panOriginal.y + event.clientY - panStart.y
-    )
     draw()
     return
   }
@@ -537,7 +658,6 @@ function onPointerMove(event) {
   updateHover(rawLocal)
   draw()
 } // End onPointerMove
-
 //=================
 function onPointerUp() {
   if (drawing.state.drag.active) {
@@ -551,14 +671,12 @@ function onPointerUp() {
   drawing.clearSnapPreview()
   draw()
 } // End onPointerUp
-
 function onWheel(event) {
   const direction = event.deltaY < 0 ? 1 : -1
   const next = app.state.viewport.zoom * (direction > 0 ? 1.12 : 0.88)
   app.setZoom(next)
   draw()
 }
-
 //=================
 function onKeyDown(event) {
   if (dimInput.value.active) return

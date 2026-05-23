@@ -269,16 +269,35 @@ function getRectSnapPoints(rect) {
 
 //=================
 export function createWallSnapResult(localPoint, wallRect, tolerance = DEFAULT_SNAP_TOLERANCE) {
-  const targets = getRectSnapPoints(wallRect)
-  let bestSnap = null
+  if (!localPoint || !wallRect) {
+    return {
+      active: false,
+      point: localPoint,
+      snap: null
+    }
+  }
 
-  targets.forEach((target) => {
+  const left = wallRect.x
+  const right = wallRect.x + wallRect.width
+  const bottom = wallRect.y
+  const top = wallRect.y + wallRect.height
+
+  const cornerTargets = [
+    { type: 'corner', key: 'bottom-left', x: left, y: bottom },
+    { type: 'corner', key: 'bottom-right', x: right, y: bottom },
+    { type: 'corner', key: 'top-right', x: right, y: top },
+    { type: 'corner', key: 'top-left', x: left, y: top }
+  ]
+
+  let bestCorner = null
+
+  cornerTargets.forEach((target) => {
     const distance = distanceBetweenPoints(localPoint, target)
 
     if (distance > tolerance) return
-    if (bestSnap && distance >= bestSnap.distance) return
+    if (bestCorner && distance >= bestCorner.distance) return
 
-    bestSnap = {
+    bestCorner = {
       type: target.type,
       key: target.key,
       x: target.x,
@@ -287,7 +306,67 @@ export function createWallSnapResult(localPoint, wallRect, tolerance = DEFAULT_S
     }
   })
 
-  if (!bestSnap) {
+  if (bestCorner) {
+    return {
+      active: true,
+      point: {
+        x: bestCorner.x,
+        y: bestCorner.y
+      },
+      snap: bestCorner
+    }
+  }
+
+  const edgeTargets = [
+    {
+      type: 'edge',
+      key: 'bottom',
+      orientation: 'horizontal',
+      x: clamp(localPoint.x, left, right),
+      y: bottom
+    },
+    {
+      type: 'edge',
+      key: 'top',
+      orientation: 'horizontal',
+      x: clamp(localPoint.x, left, right),
+      y: top
+    },
+    {
+      type: 'edge',
+      key: 'left',
+      orientation: 'vertical',
+      x: left,
+      y: clamp(localPoint.y, bottom, top)
+    },
+    {
+      type: 'edge',
+      key: 'right',
+      orientation: 'vertical',
+      x: right,
+      y: clamp(localPoint.y, bottom, top)
+    }
+  ]
+
+  let bestEdge = null
+
+  edgeTargets.forEach((target) => {
+    const distance = distanceBetweenPoints(localPoint, target)
+
+    if (distance > tolerance) return
+    if (bestEdge && distance >= bestEdge.distance) return
+
+    bestEdge = {
+      type: target.type,
+      key: target.key,
+      orientation: target.orientation,
+      x: target.x,
+      y: target.y,
+      distance
+    }
+  })
+
+  if (!bestEdge) {
     return {
       active: false,
       point: localPoint,
@@ -298,9 +377,9 @@ export function createWallSnapResult(localPoint, wallRect, tolerance = DEFAULT_S
   return {
     active: true,
     point: {
-      x: bestSnap.x,
-      y: bestSnap.y
+      x: bestEdge.x,
+      y: bestEdge.y
     },
-    snap: bestSnap
+    snap: bestEdge
   }
 } // End createWallSnapResult
