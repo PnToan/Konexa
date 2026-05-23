@@ -10,29 +10,36 @@ function nextPanelId(edge = 'panel') {
 } // End nextPanelId
 
 //=================
-function clampNumber(value, min, max) {
+function toNumber(value, fallback = 0) {
   const numberValue = Number(value)
 
-  if (!Number.isFinite(numberValue)) return min
+  if (!Number.isFinite(numberValue)) return fallback
+
+  return numberValue
+} // End toNumber
+
+//=================
+function clampNumber(value, min, max) {
+  const numberValue = toNumber(value, min)
 
   return Math.max(min, Math.min(max, numberValue))
 } // End clampNumber
 
 //=================
 function getZoneMinX(zone) {
-  return Number(zone.minX ?? zone.x ?? 0)
+  return toNumber(zone.minX ?? zone.x, 0)
 } // End getZoneMinX
 
 //=================
 function getZoneMaxX(zone) {
   if (Number.isFinite(Number(zone.maxX))) return Number(zone.maxX)
 
-  return getZoneMinX(zone) + Number(zone.width || 0)
+  return getZoneMinX(zone) + toNumber(zone.width, 0)
 } // End getZoneMaxX
 
 //=================
 function getZoneMinZ(zone) {
-  return Number(zone.minZ ?? zone.minY ?? zone.y ?? 0)
+  return toNumber(zone.minZ ?? zone.minY ?? zone.y, 0)
 } // End getZoneMinZ
 
 //=================
@@ -40,28 +47,28 @@ function getZoneMaxZ(zone) {
   if (Number.isFinite(Number(zone.maxZ))) return Number(zone.maxZ)
   if (Number.isFinite(Number(zone.maxY))) return Number(zone.maxY)
 
-  return getZoneMinZ(zone) + Number(zone.height || 0)
+  return getZoneMinZ(zone) + toNumber(zone.height, 0)
 } // End getZoneMaxZ
 
 //=================
 function getZoneWidth(zone) {
-  return getZoneMaxX(zone) - getZoneMinX(zone)
+  return Math.max(0, getZoneMaxX(zone) - getZoneMinX(zone))
 } // End getZoneWidth
 
 //=================
 function getZoneHeight(zone) {
-  return getZoneMaxZ(zone) - getZoneMinZ(zone)
+  return Math.max(0, getZoneMaxZ(zone) - getZoneMinZ(zone))
 } // End getZoneHeight
 
 //=================
 function getZoneDepth(zone) {
   const sourceBox = zone.sourceBox || zone.baseObject || zone.source
 
-  return Number(
+  return toNumber(
     zone.depth ??
     zone.ySize ??
     sourceBox?.depth ??
-    sourceBox?.ySize ??
+    sourceBox?.ySize,
     0
   )
 } // End getZoneDepth
@@ -77,27 +84,6 @@ function getFrameId(zone) {
     zone.source?.id ||
     null
 } // End getFrameId
-
-//=================
-function isPanelInSameFrame(panel, frameId) {
-  if (!panel || !frameId) return false
-
-  return panel.linkedFrameId === frameId ||
-    panel.frameId === frameId ||
-    panel.sourceBoxId === frameId ||
-    panel.baseObjectId === frameId
-} // End isPanelInSameFrame
-
-//=================
-function hasBothSidePanels(zone, panels = []) {
-  const frameId = getFrameId(zone)
-  const sameFramePanels = panels.filter((panel) => isPanelInSameFrame(panel, frameId))
-
-  const hasLeft = sameFramePanels.some((panel) => panel.panelSide === 'left' || panel.edge === 'left')
-  const hasRight = sameFramePanels.some((panel) => panel.panelSide === 'right' || panel.edge === 'right')
-
-  return hasLeft && hasRight
-} // End hasBothSidePanels
 
 //=================
 function createPanelBase(zone, edge, thickness, offset) {
@@ -140,15 +126,15 @@ function createPanelBase(zone, edge, thickness, offset) {
 } // End createPanelBase
 
 //=================
-function createVerticalPanel(zone, edge, thickness, offset) {
+function createSidePanel(zone, edge, thickness, offset) {
   const minX = getZoneMinX(zone)
   const maxX = getZoneMaxX(zone)
   const minZ = getZoneMinZ(zone)
-  const zoneHeight = getZoneHeight(zone)
   const zoneWidth = getZoneWidth(zone)
+  const zoneHeight = getZoneHeight(zone)
   const zoneDepth = getZoneDepth(zone)
-
   const safeOffset = clampNumber(offset, 0, Math.max(0, zoneWidth - thickness))
+
   const x = edge === 'left'
     ? minX + safeOffset
     : maxX - thickness - safeOffset
@@ -171,27 +157,19 @@ function createVerticalPanel(zone, edge, thickness, offset) {
     ySize: zoneDepth,
     zSize: zoneHeight,
 
-    color: '#e55353'
+    color: '#c62828'
   }
-} // End createVerticalPanel
+} // End createSidePanel
 
 //=================
-function createHorizontalPanel(zone, edge, thickness, offset, panels = []) {
+function createTopBottomPanel(zone, edge, thickness, offset) {
   const minX = getZoneMinX(zone)
-  const maxX = getZoneMaxX(zone)
   const minZ = getZoneMinZ(zone)
   const maxZ = getZoneMaxZ(zone)
   const zoneWidth = getZoneWidth(zone)
   const zoneHeight = getZoneHeight(zone)
   const zoneDepth = getZoneDepth(zone)
-
   const safeOffset = clampNumber(offset, 0, Math.max(0, zoneHeight - thickness))
-  const hasTwoSidePanels = hasBothSidePanels(zone, panels)
-
-  const x = hasTwoSidePanels ? minX + thickness : minX
-  const width = hasTwoSidePanels
-    ? Math.max(1, zoneWidth - thickness * 2)
-    : zoneWidth
 
   const z = edge === 'bottom'
     ? minZ + safeOffset
@@ -203,76 +181,73 @@ function createHorizontalPanel(zone, edge, thickness, offset, panels = []) {
     orientation: 'horizontal',
     panelKind: 'top_bottom',
 
-    x,
+    x: minX,
     y: z,
     z,
 
-    width,
+    width: zoneWidth,
     height: thickness,
     depth: zoneDepth,
 
-    xSize: width,
+    xSize: zoneWidth,
     ySize: zoneDepth,
     zSize: thickness,
 
-    color: '#3fa9f5'
+    color: '#0b63c7'
   }
-} // End createHorizontalPanel
+} // End createTopBottomPanel
 
 //=================
-export function createPanelOnZoneEdge(zone, edge, thickness = 18, offsetValue = 0, panels = []) {
+export function createPanelOnZoneEdge(zone, edge, thickness = 18, offsetValue = 0) {
   if (!zone || !edge) return null
 
-  const t = Math.max(1, Number(thickness || 18))
-  const offset = Math.max(0, Number(offsetValue || 0))
+  const t = Math.max(1, toNumber(thickness, 18))
+  const offset = Math.max(0, toNumber(offsetValue, 0))
   const zoneWidth = getZoneWidth(zone)
   const zoneHeight = getZoneHeight(zone)
 
   if (zoneWidth <= 0 || zoneHeight <= 0) return null
 
   if (edge === 'left' || edge === 'right') {
-    return createVerticalPanel(zone, edge, t, offset)
+    return createSidePanel(zone, edge, t, offset)
   }
 
   if (edge === 'top' || edge === 'bottom') {
-    return createHorizontalPanel(zone, edge, t, offset, panels)
+    return createTopBottomPanel(zone, edge, t, offset)
   }
 
   return null
 } // End createPanelOnZoneEdge
 
 //=================
-export function createPanelPreview(zone, edge, thickness = 18, offsetValue = 0, panels = []) {
-  const panel = createPanelOnZoneEdge(zone, edge, thickness, offsetValue, panels)
+export function createPanelPreview(zone, edge, thickness = 18, offsetValue = 0) {
+  const panel = createPanelOnZoneEdge(zone, edge, thickness, offsetValue)
 
   if (!panel) return null
 
   return {
     ...panel,
     id: `${panel.id}_preview`,
-    preview: true,
-    name: panel.name
+    preview: true
   }
 } // End createPanelPreview
 
 //=================
-export function splitZoneByCount(zone, edgeOrCount, countOrThickness, thicknessOrPanels, panelsOrEmpty) {
+export function splitZoneByCount(zone, edgeOrCount, countOrThickness, thicknessOrPanels) {
   if (!zone) return []
 
   let edge = edgeOrCount
   let count = countOrThickness
   let thickness = thicknessOrPanels
-  let panels = panelsOrEmpty || []
 
   if (typeof edgeOrCount === 'number') {
     edge = getZoneWidth(zone) >= getZoneHeight(zone) ? 'left' : 'bottom'
     count = edgeOrCount
     thickness = countOrThickness
-    panels = []
   }
 
-  const n = Math.max(2, Math.floor(Number(count || 2)))
-  const t = Math.max(1, Number(thickness || 18))
+  const n = Math.max(2, Math.floor(toNumber(count, 2)))
+  const t = Math.max(1, toNumber(thickness, 18))
   const result = []
 
   if (edge === 'left' || edge === 'right') {
@@ -282,7 +257,7 @@ export function splitZoneByCount(zone, edgeOrCount, countOrThickness, thicknessO
 
     for (let i = 1; i <= n - 1; i += 1) {
       const offset = clearEach * i + t * (i - 1)
-      const panel = createPanelOnZoneEdge(zone, 'left', t, offset, panels)
+      const panel = createPanelOnZoneEdge(zone, 'left', t, offset)
 
       if (!panel) continue
 
@@ -305,7 +280,7 @@ export function splitZoneByCount(zone, edgeOrCount, countOrThickness, thicknessO
 
     for (let i = 1; i <= n - 1; i += 1) {
       const offset = clearEach * i + t * (i - 1)
-      const panel = createPanelOnZoneEdge(zone, 'bottom', t, offset, panels)
+      const panel = createPanelOnZoneEdge(zone, 'bottom', t, offset)
 
       if (!panel) continue
 
@@ -325,8 +300,8 @@ export function splitZoneByCount(zone, edgeOrCount, countOrThickness, thicknessO
 } // End splitZoneByCount
 
 //=================
-export function createSplitPreview(zone, edge, count, thickness = 18, panels = []) {
-  return splitZoneByCount(zone, edge, count, thickness, panels).map((panel) => ({
+export function createSplitPreview(zone, edge, count, thickness = 18) {
+  return splitZoneByCount(zone, edge, count, thickness).map((panel) => ({
     ...panel,
     id: `${panel.id}_preview`,
     preview: true
@@ -335,8 +310,8 @@ export function createSplitPreview(zone, edge, count, thickness = 18, panels = [
 
 //=================
 export function movePanelByDelta(panel, dx, dy, lockAxis = false) {
-  let moveX = Number(dx || 0)
-  let moveY = Number(dy || 0)
+  let moveX = toNumber(dx, 0)
+  let moveY = toNumber(dy, 0)
 
   if (lockAxis) {
     if (Math.abs(moveX) >= Math.abs(moveY)) {
@@ -346,12 +321,12 @@ export function movePanelByDelta(panel, dx, dy, lockAxis = false) {
     }
   }
 
-  const nextY = Number(panel.y || 0) + moveY
-  const nextZ = Number(panel.z ?? panel.y ?? 0) + moveY
+  const nextY = toNumber(panel.y, 0) + moveY
+  const nextZ = toNumber(panel.z ?? panel.y, 0) + moveY
 
   return {
     ...panel,
-    x: Number(panel.x || 0) + moveX,
+    x: toNumber(panel.x, 0) + moveX,
     y: nextY,
     z: nextZ
   }

@@ -1,6 +1,6 @@
 import { createSimpleStore } from './createStore'
-import { useAppStore } from './useAppStore'
 import { useCabinetStore } from './useCabinetStore'
+import { useAppStore } from './useAppStore'
 import { useBoxStore } from './useBoxStore'
 import { buildZones } from '../core/zone/zone-engine'
 import {
@@ -12,19 +12,13 @@ import {
 } from '../core/panel/panel-engine'
 import { projectBoxToCameraRect } from '../core/view/view-camera'
 
-let panelInputTimer = null
-
 const store = createSimpleStore({
   panels: [],
   zones: [],
   hover: null,
   snapPreview: null,
   selectedPanelId: null,
-
   panelInputBuffer: '',
-  panelPreviewBuffer: '',
-  panelPreviewVersion: 0,
-
   drag: {
     active: false,
     panelId: null,
@@ -72,6 +66,7 @@ const store = createSimpleStore({
         baseObjectId: baseBox.id,
         depth: baseBox.depth,
         source: baseBox,
+        sourceBox: baseBox,
         baseObject: baseBox
       }
 
@@ -101,7 +96,7 @@ const store = createSimpleStore({
 
   //=================
   setHover(hit) {
-    if (!this.isPanelToolAllowed() && hit?.type === 'zone-edge') {
+    if (hit?.type === 'zone-edge' && !this.isPanelToolAllowed()) {
       state.hover = null
       return
     }
@@ -130,29 +125,8 @@ const store = createSimpleStore({
   }, // End clearSelection
 
   //=================
-  schedulePanelPreviewUpdate() {
-    if (panelInputTimer) {
-      clearTimeout(panelInputTimer)
-      panelInputTimer = null
-    }
-
-    panelInputTimer = setTimeout(() => {
-      state.panelPreviewBuffer = state.panelInputBuffer
-      state.panelPreviewVersion += 1
-      panelInputTimer = null
-    }, 1000)
-  }, // End schedulePanelPreviewUpdate
-
-  //=================
   clearPanelInput() {
-    if (panelInputTimer) {
-      clearTimeout(panelInputTimer)
-      panelInputTimer = null
-    }
-
     state.panelInputBuffer = ''
-    state.panelPreviewBuffer = ''
-    state.panelPreviewVersion += 1
   }, // End clearPanelInput
 
   //=================
@@ -161,26 +135,22 @@ const store = createSimpleStore({
       if (state.panelInputBuffer.startsWith('/')) return
 
       state.panelInputBuffer = `/${state.panelInputBuffer}`
-      this.schedulePanelPreviewUpdate()
       return
     }
 
     if (/^[0-9]$/.test(key)) {
       state.panelInputBuffer += key
-      this.schedulePanelPreviewUpdate()
     }
   }, // End appendPanelInput
 
   //=================
   backspacePanelInput() {
     state.panelInputBuffer = state.panelInputBuffer.slice(0, -1)
-    this.schedulePanelPreviewUpdate()
   }, // End backspacePanelInput
 
   //=================
-  getPanelInputMode(usePreviewBuffer = false) {
-    const rawBuffer = usePreviewBuffer ? state.panelPreviewBuffer : state.panelInputBuffer
-    const buffer = String(rawBuffer || '').trim()
+  getPanelInputMode() {
+    const buffer = String(state.panelInputBuffer || '').trim()
 
     if (buffer === '') {
       return {
@@ -211,7 +181,7 @@ const store = createSimpleStore({
     if (!this.isPanelToolAllowed()) return []
     if (!state.hover || state.hover.type !== 'zone-edge') return []
 
-    const input = this.getPanelInputMode(true)
+    const input = this.getPanelInputMode()
     const thickness = this.getPanelThickness()
 
     if (input.mode === 'divide') {
@@ -246,15 +216,7 @@ const store = createSimpleStore({
 
     if (!state.hover || state.hover.type !== 'zone-edge') return null
 
-    if (panelInputTimer) {
-      clearTimeout(panelInputTimer)
-      panelInputTimer = null
-    }
-
-    state.panelPreviewBuffer = state.panelInputBuffer
-    state.panelPreviewVersion += 1
-
-    const input = this.getPanelInputMode(false)
+    const input = this.getPanelInputMode()
     const thickness = this.getPanelThickness()
 
     if (input.mode === 'divide') {
@@ -316,6 +278,7 @@ const store = createSimpleStore({
 
     if (panels[0]) state.selectedPanelId = panels[0].id
 
+    this.clearPanelInput()
     this.rebuildZones()
     useAppStore().setStatus(`Đã chia zone /${count}`)
 

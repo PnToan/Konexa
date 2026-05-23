@@ -263,14 +263,6 @@ function drawZoneOverlay(ctx, viewport, zones = [], hover) {
       stroke: isHoverZone ? 'rgba(255, 105, 180, 0.65)' : 'rgba(63, 169, 245, 0.28)',
       lineWidth: isHoverZone ? 2 : 1
     })
-
-    const center = localToScreen(viewport, zone.x + zone.width / 2, zone.y + zone.height / 2)
-
-    ctx.fillStyle = isHoverZone ? 'rgba(190, 30, 110, 0.85)' : 'rgba(63, 169, 245, 0.55)'
-    ctx.font = '11px Arial'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(zone.name || 'Zone', center.x, center.y)
   })
 
   if (hover && hover.type === 'zone-edge') {
@@ -318,18 +310,10 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
     const selected = panel.id === selectedPanelId
 
     drawRectLocal(ctx, viewport, rect, {
-      fill: selected ? 'rgba(0, 119, 204, 0.18)' : 'rgba(0, 119, 204, 0.10)',
-      stroke: selected ? '#0077CC' : 'rgba(0, 119, 204, 0.65)',
-      lineWidth: selected ? 2 : 1
+      fill: 'rgba(0, 64, 160, 0.90)',
+      stroke: selected ? '#ff9f1a' : '#002f78',
+      lineWidth: selected ? 3 : 2
     })
-
-    const center = localToScreen(viewport, rect.x + rect.width / 2, rect.y + rect.height / 2)
-
-    ctx.fillStyle = '#0077CC'
-    ctx.font = '11px Arial'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(panel.name || 'Tấm', center.x, center.y)
 
     if (!selected) return
 
@@ -339,6 +323,7 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
     drawPanelGrip(ctx, viewport, { x: rect.x, y: rect.y + rect.height })
   })
 } // End drawPanels
+
 //=================
 function drawPanelPreviewItems(ctx, viewport, previewItems = []) {
   if (!Array.isArray(previewItems) || previewItems.length === 0) return
@@ -360,7 +345,6 @@ function drawPanelPreviewItems(ctx, viewport, previewItems = []) {
     const center = localToScreen(viewport, rect.x + rect.width / 2, rect.y + rect.height / 2)
 
     ctx.setLineDash([])
-    ctx.fillStyle = '#b0005a'
     ctx.font = '12px Arial'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -517,19 +501,6 @@ function drawBoxes(ctx, viewport, boxes = [], selectedBoxId, editingDim, current
       stroke: '#0077CC',
       lineWidth: selectedBoxId === box.id ? 3 : 2
     })
-
-    const center = localToScreen(
-      viewport,
-      boxRect.x + boxRect.width / 2,
-      boxRect.y + boxRect.height / 2
-    )
-
-    ctx.fillStyle = '#0077CC'
-    ctx.font = '11px Arial'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(box.name || 'Box', center.x, center.y)
-
     drawBoxDims(ctx, viewport, box, editingDim, currentView)
   })
 } // End drawBoxes

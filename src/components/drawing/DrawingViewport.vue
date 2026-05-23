@@ -128,7 +128,8 @@ function draw() {
     wallEditingDim: wall.state.editingDim,
     zones: drawing.state.zones,
     panels: drawing.state.panels,
-    panels: drawing.state.panels,
+    panelPreviewItems: drawing.getPanelPreviewItems(),
+    panelInputBuffer: drawing.state.panelInputBuffer,
     boxes: box.state.boxes,
     boxDraftRect: box.getDraftRect(),
     boxEditingDim: box.state.editingDim,
@@ -328,7 +329,6 @@ function updateHover(local) {
   if (app.state.currentTool === 'panel') {
     if (app.state.currentView !== 'front') {
       drawing.setHover(null)
-      app.setStatus('Vẽ Tấm chỉ hoạt động ở mặt Trước')
       return
     }
 
@@ -528,17 +528,20 @@ function onDimInputKeyDown(event) {
 //=================
 function onPointerDown(event) {
   viewportRef.value.focus()
+
   const rawLocal = localFromEvent(event)
   const local = getBoxSnapLocal(rawLocal)
   const canvasRect = canvasRef.value.getBoundingClientRect()
   const screenX = event.clientX - canvasRect.left
   const screenY = event.clientY - canvasRect.top
+
   const wallDimHit = getWallDimHit(
     app.state.viewport,
     projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
     screenX,
     screenY
   )
+
   const boxDimHit = getBoxDimHit(
     app.state.viewport,
     box.state.boxes,
@@ -546,19 +549,23 @@ function onPointerDown(event) {
     screenY,
     app.state.currentView
   )
+
   const activeDimHit = boxDimHit || wallDimHit || hoverDim.value
+
   if (activeDimHit) {
     event.preventDefault()
     event.stopPropagation()
     openDimInput(activeDimHit)
     return
   }
+
   if (event.button === 1 || event.button === 2 || event.shiftKey) {
     panning = true
     panStart = { x: event.clientX, y: event.clientY }
     panOriginal = { x: app.state.viewport.panX, y: app.state.viewport.panY }
     return
   }
+
   if (app.state.currentTool === 'box') {
     if (!box.state.draft.active) {
       box.startDraft(local)
@@ -566,7 +573,9 @@ function onPointerDown(event) {
       draw()
       return
     }
+
     box.updateDraft(local)
+
     const newBox = box.commitDraft(wall.state.height)
 
     if (newBox) {
@@ -579,10 +588,6 @@ function onPointerDown(event) {
     draw()
     return
   }
-  const gripHit = app.state.currentTool === 'move' ? hitTestMoveGrip(local) : null
-  const panelHit = hitTestPanel(drawing.state.panels, local)
-  if (app.state.currentTool === 'panel') {
-    updateHover(local)
 
   if (app.state.currentTool === 'panel') {
     if (app.state.currentView !== 'front') {
@@ -602,27 +607,34 @@ function onPointerDown(event) {
     draw()
     return
   }
-  }
+
+  const gripHit = app.state.currentTool === 'move' ? hitTestMoveGrip(local) : null
+  const panelHit = hitTestPanel(drawing.state.panels, local)
+
   if (app.state.currentTool === 'move' && gripHit) {
     drawing.selectPanel(gripHit.panel.id)
     drawing.startMove(gripHit.panel.id, gripHit.gripPoint)
     draw()
     return
   }
+
   if ((app.state.currentTool === 'select' || app.state.currentTool === 'move') && panelHit) {
     drawing.selectPanel(panelHit.panel.id)
+
     if (app.state.currentTool === 'move') {
       drawing.startMove(panelHit.panel.id, local)
     }
+
     draw()
     return
   }
+
   if (app.state.currentTool === 'select') {
     drawing.clearSelection()
     box.clearSelection()
   }
-  draw()
 
+  draw()
 } // End onPointerDown
 //=================
 function onPointerMove(event) {
@@ -715,7 +727,10 @@ function onKeyDown(event) {
   if (app.state.currentTool === 'panel') {
     if (app.state.currentView !== 'front') {
       if (key === 'Escape') {
+        event.preventDefault()
         app.setTool('select')
+        drawing.clearPanelInput()
+        drawing.setHover(null)
         draw()
       }
 
@@ -782,7 +797,6 @@ watch(() => [
   drawing.state.panels.length,
   drawing.state.zones.length,
   drawing.state.selectedPanelId,
-  drawing.state.panelPreviewVersion,
   drawing.state.panelInputBuffer,
   app.state.mini3DVisible
 ], draw)
