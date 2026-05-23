@@ -279,25 +279,36 @@ function drawZoneOverlay(ctx, viewport, zones = [], hover) {
     drawLine(ctx, a, b, '#ff9f1a', 4)
   }
 } // End drawZoneOverlay
-
 //=================
-function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
-  panels.forEach((panel) => {
-    drawRectLocal(ctx, viewport, panel, {
-      fill: panel.color || '#e55353',
-      stroke: selectedPanelId === panel.id ? '#ffea00' : '#444444',
-      lineWidth: selectedPanelId === panel.id ? 3 : 1
-    })
+function drawSnapPreview(ctx, viewport, snapPreview) {
+  if (!snapPreview) return
 
-    const center = localToScreen(viewport, panel.x + panel.width / 2, panel.y + panel.height / 2)
+  const point = localToScreen(viewport, snapPreview.x, snapPreview.y)
 
-    ctx.fillStyle = '#ffffff'
-    ctx.font = '10px Arial'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(panel.name, center.x, center.y)
-  })
-} // End drawPanels
+  ctx.save()
+  ctx.strokeStyle = '#0077CC'
+  ctx.fillStyle = '#ffffff'
+  ctx.lineWidth = 2
+
+  if (snapPreview.type === 'corner') {
+    ctx.beginPath()
+    ctx.arc(point.x, point.y, 6, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+    ctx.restore()
+    return
+  }
+
+  if (snapPreview.type === 'edge') {
+    ctx.beginPath()
+    ctx.rect(point.x - 5, point.y - 5, 10, 10)
+    ctx.fill()
+    ctx.stroke()
+  }
+
+  ctx.restore()
+} // End drawSnapPreview
+
 //=================
 function drawBoxDims(ctx, viewport, box, editingDim, currentView = 'top') {
   if (!box) return
@@ -498,6 +509,7 @@ export function renderCanvas2D(ctx, payload) {
     boxDraftRect,
     boxEditingDim,
     hover,
+    snapPreview,
     selectedPanelId,
     selectedBoxId,
     showGrid
@@ -519,6 +531,6 @@ export function renderCanvas2D(ctx, payload) {
   drawBoxDraft(ctx, viewport, boxDraftRect, currentView)
 
   drawPanels(ctx, viewport, panels, selectedPanelId)
-
+  drawSnapPreview(ctx, viewport, snapPreview)
   drawRulers(ctx, viewport, width, height)
 } // End renderCanvas2D
