@@ -100,13 +100,14 @@ const VIEW_CONFIG = {
 }
 
 const TOOL_LABEL = {
-  select: 'Chọn',
-  line: 'Line',
-  rect: 'Khung',
-  panel: 'Vẽ Tấm',
-  move: 'Di chuyển',
-  offset: 'Offset',
-  measure: 'Đo'
+ box: 'Box',
+ select: 'Chọn',
+ line: 'Line',
+ rect: 'Khung',
+ panel: 'Vẽ Tấm',
+ move: 'Di chuyển',
+ offset: 'Offset',
+ measure: 'Đo'
 }
 
 const store = createSimpleStore({
