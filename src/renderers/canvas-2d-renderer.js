@@ -1,4 +1,5 @@
 import { localToScreen, getLocalScale } from './viewport-transform'
+import { projectBoxToCameraRect } from '../core/view/view-camera'
 
 //=================
 function drawLine(ctx, a, b, color = '#999', width = 1) {
@@ -297,24 +298,208 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelId) {
     ctx.fillText(panel.name, center.x, center.y)
   })
 } // End drawPanels
+//=================
+function drawBoxDims(ctx, viewport, box, editingDim, currentView = 'top') {
+  if (!box) return
 
+  const boxRect = projectBoxToCameraRect(box, currentView)
+  const viewDim = getBoxViewDimKeys(currentView)
+
+  const leftTop = localToScreen(viewport, boxRect.x, boxRect.y + boxRect.height)
+  const rightTop = localToScreen(viewport, boxRect.x + boxRect.width, boxRect.y + boxRect.height)
+  const leftBottom = localToScreen(viewport, boxRect.x, boxRect.y)
+
+  const topDimY = leftTop.y - 30
+  const leftDimX = leftTop.x - 36
+
+  const widthColor = editingDim === viewDim.horizontal ? '#ff9f1a' : '#0077CC'
+  const heightColor = editingDim === viewDim.vertical ? '#ff9f1a' : '#0077CC'
+
+  drawLine(ctx, { x: leftTop.x, y: topDimY }, { x: rightTop.x, y: topDimY }, widthColor, 2)
+  drawLine(ctx, { x: leftDimX, y: leftTop.y }, { x: leftDimX, y: leftBottom.y }, heightColor, 2)
+
+  drawLine(ctx, { x: leftTop.x, y: topDimY - 5 }, { x: leftTop.x, y: topDimY + 5 }, widthColor, 2)
+  drawLine(ctx, { x: rightTop.x, y: topDimY - 5 }, { x: rightTop.x, y: topDimY + 5 }, widthColor, 2)
+  drawLine(ctx, { x: leftDimX - 5, y: leftTop.y }, { x: leftDimX + 5, y: leftTop.y }, heightColor, 2)
+  drawLine(ctx, { x: leftDimX - 5, y: leftBottom.y }, { x: leftDimX + 5, y: leftBottom.y }, heightColor, 2)
+
+  ctx.fillStyle = '#0077CC'
+  ctx.font = '12px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  if (editingDim !== viewDim.horizontal) {
+    ctx.fillText(String(Math.round(box[viewDim.horizontal])), (leftTop.x + rightTop.x) / 2, topDimY - 12)
+  }
+
+  if (editingDim !== viewDim.vertical) {
+    ctx.save()
+    ctx.translate(leftDimX - 16, (leftTop.y + leftBottom.y) / 2)
+    ctx.rotate(-Math.PI / 2)
+    ctx.fillText(String(Math.round(box[viewDim.vertical])), 0, 0)
+    ctx.restore()
+  }
+} // End drawBoxDims
+//=================
+function getBoxViewDimKeys(currentView = 'top') {
+  if (currentView === 'front' || currentView === 'back') {
+    return {
+      horizontal: 'width',
+      vertical: 'height'
+    }
+  }
+
+  if (currentView === 'left' || currentView === 'right') {
+    return {
+      horizontal: 'depth',
+      vertical: 'height'
+    }
+  }
+
+  return {
+    horizontal: 'width',
+    vertical: 'depth'
+  }
+} // End getBoxViewDimKeys
+//=================
+function drawBoxes(ctx, viewport, boxes = [], selectedBoxId, editingDim, currentView = 'top') {
+  boxes.forEach((box) => {
+    const boxRect = projectBoxToCameraRect(box, currentView)
+
+    drawRectLocal(ctx, viewport, boxRect, {
+      fill: box.color || 'rgba(0, 119, 204, 0.12)',
+      stroke: '#0077CC',
+      lineWidth: selectedBoxId === box.id ? 3 : 2
+    })
+
+    const center = localToScreen(
+      viewport,
+      boxRect.x + boxRect.width / 2,
+      boxRect.y + boxRect.height / 2
+    )
+
+    ctx.fillStyle = '#0077CC'
+    ctx.font = '11px Arial'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(box.name || 'Box', center.x, center.y)
+
+    drawBoxDims(ctx, viewport, box, editingDim, currentView)
+  })
+} // End drawBoxes
+
+//=================
+function drawBoxDraft(ctx, viewport, draftRect, currentView = 'top') {
+  if (!draftRect) return
+  if (currentView !== 'top') return
+  if (draftRect.width <= 1 || draftRect.depth <= 1) return
+
+  drawRectLocal(ctx, viewport, {
+    x: draftRect.x,
+    y: draftRect.y,
+    width: draftRect.width,
+    height: draftRect.depth
+  }, {
+    fill: 'rgba(0, 119, 204, 0.12)',
+    stroke: '#0077CC',
+    lineWidth: 2
+  })
+} // End drawBoxDraft
+//=================
+function hitTestBoxDim(viewport, boxes = [], screenX, screenY, currentView = 'top') {
+  const viewDim = getBoxViewDimKeys(currentView)
+
+  for (let i = boxes.length - 1; i >= 0; i -= 1) {
+    const box = boxes[i]
+    const boxRect = projectBoxToCameraRect(box, currentView)
+
+    const leftTop = localToScreen(viewport, boxRect.x, boxRect.y + boxRect.height)
+    const rightTop = localToScreen(viewport, boxRect.x + boxRect.width, boxRect.y + boxRect.height)
+    const leftBottom = localToScreen(viewport, boxRect.x, boxRect.y)
+
+    const topDimY = leftTop.y - 30
+    const leftDimX = leftTop.x - 36
+
+    const horizontalTextX = (leftTop.x + rightTop.x) / 2
+    const horizontalTextY = topDimY - 12
+    const verticalTextX = leftDimX - 16
+    const verticalTextY = (leftTop.y + leftBottom.y) / 2
+
+    const horizontalTextHit =
+      Math.abs(screenX - horizontalTextX) <= 48 &&
+      Math.abs(screenY - horizontalTextY) <= 18
+
+    if (horizontalTextHit) {
+      return {
+        boxId: box.id,
+        key: viewDim.horizontal
+      }
+    }
+
+    const verticalTextHit =
+      Math.abs(screenX - verticalTextX) <= 28 &&
+      Math.abs(screenY - verticalTextY) <= 48
+
+    if (verticalTextHit) {
+      return {
+        boxId: box.id,
+        key: viewDim.vertical
+      }
+    }
+
+    const horizontalLineHit =
+      screenX >= Math.min(leftTop.x, rightTop.x) - 18 &&
+      screenX <= Math.max(leftTop.x, rightTop.x) + 18 &&
+      Math.abs(screenY - topDimY) <= 22
+
+    if (horizontalLineHit) {
+      return {
+        boxId: box.id,
+        key: viewDim.horizontal
+      }
+    }
+
+    const verticalLineHit =
+      Math.abs(screenX - leftDimX) <= 22 &&
+      screenY >= Math.min(leftTop.y, leftBottom.y) - 18 &&
+      screenY <= Math.max(leftTop.y, leftBottom.y) + 18
+
+    if (verticalLineHit) {
+      return {
+        boxId: box.id,
+        key: viewDim.vertical
+      }
+    }
+  }
+
+  return null
+} // End hitTestBoxDim
 //=================
 export function getWallDimHit(viewport, wallRect, screenX, screenY) {
   return hitTestWallDim(viewport, wallRect, screenX, screenY)
 } // End getWallDimHit
 
 //=================
+export function getBoxDimHit(viewport, boxes, screenX, screenY, currentView = 'top') {
+  return hitTestBoxDim(viewport, boxes, screenX, screenY, currentView)
+} // End getBoxDimHit
+//=================
 export function renderCanvas2D(ctx, payload) {
   const {
     width,
     height,
     viewport,
+    currentView,
     wallRect,
     wallEditingDim,
     zones,
     panels,
+    boxes,
+    boxDraftRect,
+    boxEditingDim,
     hover,
     selectedPanelId,
+    selectedBoxId,
     showGrid
   } = payload
 
@@ -329,6 +514,9 @@ export function renderCanvas2D(ctx, payload) {
     drawWall(ctx, viewport, wallRect)
     drawWallDims(ctx, viewport, wallRect, wallEditingDim)
   }
+
+  drawBoxes(ctx, viewport, boxes, selectedBoxId, boxEditingDim, currentView)
+  drawBoxDraft(ctx, viewport, boxDraftRect, currentView)
 
   drawPanels(ctx, viewport, panels, selectedPanelId)
 

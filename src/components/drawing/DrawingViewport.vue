@@ -39,7 +39,8 @@ import { useAppStore } from '../../stores/useAppStore'
 import { useCabinetStore } from '../../stores/useCabinetStore'
 import { useWallStore } from '../../stores/useWallStore'
 import { useDrawingStore } from '../../stores/useDrawingStore'
-import { renderCanvas2D, getWallDimHit } from '../../renderers/canvas-2d-renderer'
+import { useBoxStore } from '../../stores/useBoxStore'
+import { renderCanvas2D, getWallDimHit, getBoxDimHit } from '../../renderers/canvas-2d-renderer'
 import { screenToLocal, localToScreen } from '../../renderers/viewport-transform'
 import { projectBoxToCameraRect, cameraLocalToWorldPoint } from '../../core/view/view-camera'
 import { createMoveSnapResult, getPanelSnapPoints, hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
@@ -49,6 +50,7 @@ const app = useAppStore()
 const cabinet = useCabinetStore()
 const wall = useWallStore()
 const drawing = useDrawingStore()
+const box = useBoxStore()
 const viewportRef = ref(null)
 const canvasRef = ref(null)
 const dimInputRef = ref(null)
@@ -88,9 +90,9 @@ const dimInputStyle = computed(() => ({
 const canvasCursorClass = computed(() => {
   if (hoverDim.value) return 'mn-cursor-pointer'
   if (app.state.currentTool === 'move') return 'mn-cursor-move'
+  if (app.state.currentTool === 'box') return 'mn-cursor-box'
   if (app.state.currentTool === 'panel') return 'mn-cursor-crosshair'
   if (app.state.currentTool === 'select') return 'mn-cursor-select'
-
   return 'mn-cursor-default'
 })
 function resizeCanvas() {
@@ -117,15 +119,20 @@ function draw() {
   const wallRect = projectBoxToCameraRect(getWallBox3D(), app.state.currentView)
 
   renderCanvas2D(ctx, {
-    width: viewport.width,
-    height: viewport.height,
-    viewport,
-    wallRect,
+    width,
+    height,
+    viewport: app.state.viewport,
+    currentView: app.state.currentView,
+    wallRect: projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
     wallEditingDim: wall.state.editingDim,
-    zones: drawing.state.zones,
+    zones: drawing.getZones(),
     panels: drawing.state.panels,
+    boxes: box.state.boxes,
+    boxDraftRect: box.getDraftRect(),
+    boxEditingDim: box.state.editingDim,
     hover: drawing.state.hover,
     selectedPanelId: drawing.state.selectedPanelId,
+    selectedBoxId: box.state.selectedBoxId,
     showGrid: app.state.showGrid
   })
 } // End draw
@@ -239,30 +246,97 @@ function getWallDimInputInfo(dimKey) {
 
   return null
 } // End getWallDimInputInfo
-
 //=================
-function openDimInput(dimKey) {
-  const info = getWallDimInputInfo(dimKey)
+function getBoxViewDimKeys(currentView = 'top') {
+  if (currentView === 'front' || currentView === 'back') {
+    return {
+      horizontal: 'width',
+      vertical: 'height'
+    }
+  }
 
+  if (currentView === 'left' || currentView === 'right') {
+    return {
+      horizontal: 'depth',
+      vertical: 'height'
+    }
+  }
+
+  return {
+    horizontal: 'width',
+    vertical: 'depth'
+  }
+} // End getBoxViewDimKeys
+//=================
+function getBoxDimInputInfo(dimHit) {
+  if (!dimHit) return null
+
+  const targetBox = box.state.boxes.find((item) => item.id === dimHit.boxId)
+  if (!targetBox) return null
+
+  const currentView = app.state.currentView
+  const viewDim = getBoxViewDimKeys(currentView)
+  const boxRect = projectBoxToCameraRect(targetBox, currentView)
+  const viewport = app.state.viewport
+
+  const leftTop = localToScreen(viewport, boxRect.x, boxRect.y + boxRect.height)
+  const rightTop = localToScreen(viewport, boxRect.x + boxRect.width, boxRect.y + boxRect.height)
+  const leftBottom = localToScreen(viewport, boxRect.x, boxRect.y)
+
+  if (dimHit.key === viewDim.horizontal) {
+    return {
+      target: 'box',
+      boxId: targetBox.id,
+      key: viewDim.horizontal,
+      value: String(Math.round(targetBox[viewDim.horizontal])),
+      x: (leftTop.x + rightTop.x) / 2,
+      y: leftTop.y - 42
+    }
+  }
+
+  if (dimHit.key === viewDim.vertical) {
+    return {
+      target: 'box',
+      boxId: targetBox.id,
+      key: viewDim.vertical,
+      value: String(Math.round(targetBox[viewDim.vertical])),
+      x: leftTop.x - 52,
+      y: (leftTop.y + leftBottom.y) / 2
+    }
+  }
+
+  return null
+} // End getBoxDimInputInfo
+//=================
+function openDimInput(dimHit) {
+  const info = typeof dimHit === 'string'
+    ? getWallDimInputInfo(dimHit)
+    : getBoxDimInputInfo(dimHit)
   if (!info) return
-
   dimInput.value = {
     active: true,
+    target: info.target || 'wall',
+    boxId: info.boxId || null,
     key: info.key,
     x: info.x,
     y: info.y,
     value: info.value
   }
-
-  wall.setEditingDim(info.editKey)
+  if (dimInput.value.target === 'box') {
+    box.selectBox(info.boxId)
+    box.setEditingDim(info.key)
+    wall.clearEditingDim()
+    app.setStatus(`Nhập kích thước Box: ${info.key}`)
+  } else {
+    wall.setEditingDim(info.editKey)
+    box.clearEditingDim()
+    app.setStatus(`Nhập kích thước Wall: ${info.key}`)
+  }
   app.clearCommand()
-  app.setStatus(`Nhập kích thước Wall: ${info.key}`)
-
   nextTick(() => {
     dimInputRef.value?.focus()
     dimInputRef.value?.select()
   })
-
   draw()
 } // End openDimInput
 
@@ -270,22 +344,27 @@ function openDimInput(dimKey) {
 function cancelDimInput() {
   dimInput.value.active = false
   wall.clearEditingDim()
+  box.clearEditingDim()
   draw()
 } // End cancelDimInput
 
 //=================
 function commitDimInput() {
   const numberValue = Number(dimInput.value.value)
-
   if (!Number.isFinite(numberValue) || numberValue <= 0) {
     cancelDimInput()
     return
   }
-
-  wall.setSize(dimInput.value.key, numberValue)
-  app.setStatus(`Đã cập nhật Wall ${dimInput.value.key}: ${numberValue}mm`)
+  if (dimInput.value.target === 'box') {
+    box.setBoxSize(dimInput.value.boxId, dimInput.value.key, numberValue)
+    app.setStatus(`Đã cập nhật Box ${dimInput.value.key}: ${numberValue}mm`)
+  } else {
+    wall.setSize(dimInput.value.key, numberValue)
+    app.setStatus(`Đã cập nhật Wall ${dimInput.value.key}: ${numberValue}mm`)
+  }
   dimInput.value.active = false
   wall.clearEditingDim()
+  box.clearEditingDim()
   draw()
 } // End commitDimInput
 
@@ -305,76 +384,105 @@ function onDimInputKeyDown(event) {
 //=================
 function onPointerDown(event) {
   viewportRef.value.focus()
-
   const local = localFromEvent(event)
-  
   const canvasRect = canvasRef.value.getBoundingClientRect()
-
-  const dimHit = getWallDimHit(
+  const screenX = event.clientX - canvasRect.left
+  const screenY = event.clientY - canvasRect.top
+  const wallDimHit = getWallDimHit(
     app.state.viewport,
     projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
-    event.clientX - canvasRect.left,
-    event.clientY - canvasRect.top
+    screenX,
+    screenY
   )
-
-  const activeDimHit = dimHit || hoverDim.value
-
+  const boxDimHit = getBoxDimHit(
+    app.state.viewport,
+    box.state.boxes,
+    screenX,
+    screenY,
+    app.state.currentView
+  )
+  const activeDimHit = boxDimHit || wallDimHit || hoverDim.value
   if (activeDimHit) {
     event.preventDefault()
     event.stopPropagation()
     openDimInput(activeDimHit)
     return
   }
-
   if (event.button === 1 || event.button === 2 || event.shiftKey) {
     panning = true
     panStart = { x: event.clientX, y: event.clientY }
     panOriginal = { x: app.state.viewport.panX, y: app.state.viewport.panY }
     return
   }
-
+  if (app.state.currentTool === 'box') {
+    if (!box.state.draft.active) {
+      box.startDraft(local)
+      app.setStatus('Box: chọn điểm góc thứ hai')
+      draw()
+      return
+    }
+    box.updateDraft(local)
+    const newBox = box.commitDraft(wall.state.height)
+    if (newBox) {
+      app.setStatus(`Đã tạo ${newBox.name}`)
+    } else {
+      app.setStatus('Box quá nhỏ, chưa tạo')
+    }
+    draw()
+    return
+  }
   const gripHit = app.state.currentTool === 'move' ? hitTestMoveGrip(local) : null
   const panelHit = hitTestPanel(drawing.state.panels, local)
-
   if (app.state.currentTool === 'panel' && drawing.state.hover?.type === 'zone-edge') {
     drawing.addPanelFromHover()
     draw()
     return
   }
-
   if (app.state.currentTool === 'move' && gripHit) {
     drawing.selectPanel(gripHit.panel.id)
     drawing.startMove(gripHit.panel.id, gripHit.gripPoint)
     draw()
     return
   }
-
   if ((app.state.currentTool === 'select' || app.state.currentTool === 'move') && panelHit) {
     drawing.selectPanel(panelHit.panel.id)
-
     if (app.state.currentTool === 'move') {
       drawing.startMove(panelHit.panel.id, local)
     }
-
     draw()
     return
   }
-
   if (app.state.currentTool === 'select') {
     drawing.clearSelection()
+    box.clearSelection()
   }
-
   draw()
+
 } // End onPointerDown
 function onPointerMove(event) {
   const local = localFromEvent(event)
   const canvasRect = canvasRef.value.getBoundingClientRect()
-  hoverDim.value = getWallDimHit(
+  const screenX = event.clientX - canvasRect.left
+  const screenY = event.clientY - canvasRect.top
+  const wallDimHit = getWallDimHit(
     app.state.viewport,
     projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
-    event.clientX - canvasRect.left,
-    event.clientY - canvasRect.top
+    screenX,
+    screenY
   )
+  const boxDimHit = getBoxDimHit(
+    app.state.viewport,
+    box.state.boxes,
+    screenX,
+    screenY,
+    app.state.currentView
+  )
+  hoverDim.value = boxDimHit || wallDimHit
+    if (app.state.currentTool === 'box' && box.state.draft.active) {
+    box.updateDraft(local)
+    draw()
+    return
+  }
   if (panning && panStart && panOriginal) {
     app.setPan(panOriginal.x + event.clientX - panStart.x, panOriginal.y + event.clientY - panStart.y)
     draw()
@@ -440,7 +548,7 @@ watch(() => [cabinet.state.width, cabinet.state.depth, cabinet.state.height, cab
   draw()
 })
 watch(() => [drawing.state.panels.length, drawing.state.zones.length, drawing.state.selectedPanelId, app.state.mini3DVisible], draw)
-watch(() => [wall.state.width, wall.state.depth, wall.state.height, wall.state.editingDim], draw)
+watch(() => [box.state.boxes.length, box.state.selectedBoxId, box.state.editingDim, box.state.draft.active], draw)
 onMounted(() => {
   resizeCanvas()
   window.addEventListener('resize', resizeCanvas)
@@ -452,8 +560,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeCanvas))
   cursor: move;
 }
 
-.mn-cursor-crosshair {
-  cursor: crosshair;
+.mn-cursor-box {
+  cursor: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 2 L4 22 L9 17 L13 27 L17 25 L13 15 L20 15 Z' fill='white' stroke='%23111111' stroke-width='1.4' stroke-linejoin='round'/%3E%3Crect x='13' y='21' width='14' height='8' rx='1.5' fill='%23dbefff' stroke='%230077CC' stroke-width='1.5'/%3E%3C/svg%3E") 4 2, crosshair;
 }
 
 .mn-cursor-select {
