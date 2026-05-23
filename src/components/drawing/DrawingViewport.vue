@@ -559,20 +559,27 @@ function onPointerDown(event) {
     }
     box.updateDraft(local)
     const newBox = box.commitDraft(wall.state.height)
+
     if (newBox) {
+      drawing.rebuildZones()
       app.setStatus(`Đã tạo ${newBox.name}`)
     } else {
       app.setStatus('Box quá nhỏ, chưa tạo')
     }
+
     draw()
     return
   }
   const gripHit = app.state.currentTool === 'move' ? hitTestMoveGrip(local) : null
   const panelHit = hitTestPanel(drawing.state.panels, local)
-  if (app.state.currentTool === 'panel' && drawing.state.hover?.type === 'zone-edge') {
-    drawing.addPanelFromHover()
-    draw()
-    return
+  if (app.state.currentTool === 'panel') {
+    updateHover(local)
+
+    if (drawing.state.hover?.type === 'zone-edge') {
+      drawing.addPanelFromHover()
+      draw()
+      return
+    }
   }
   if (app.state.currentTool === 'move' && gripHit) {
     drawing.selectPanel(gripHit.panel.id)
@@ -678,9 +685,53 @@ function onWheel(event) {
   draw()
 }
 //=================
+//=================
 function onKeyDown(event) {
   if (dimInput.value.active) return
+
   const key = event.key
+
+  if (app.state.currentTool === 'panel') {
+    if (/^[0-9]$/.test(key)) {
+      event.preventDefault()
+      drawing.appendPanelInput(key)
+      app.setStatus(`Vẽ Tấm: ${drawing.state.panelInputBuffer}`)
+      draw()
+      return
+    }
+
+    if (key === '/') {
+      event.preventDefault()
+      drawing.appendPanelInput(key)
+      app.setStatus(`Vẽ Tấm: ${drawing.state.panelInputBuffer}`)
+      draw()
+      return
+    }
+
+    if (key === 'Backspace') {
+      event.preventDefault()
+      drawing.backspacePanelInput()
+      app.setStatus(drawing.state.panelInputBuffer ? `Vẽ Tấm: ${drawing.state.panelInputBuffer}` : 'Vẽ Tấm')
+      draw()
+      return
+    }
+
+    if (key === 'Escape') {
+      event.preventDefault()
+      drawing.clearPanelInput()
+      drawing.setHover(null)
+      app.setStatus('Đã hủy nhập Vẽ Tấm')
+      draw()
+      return
+    }
+
+    if (key === 'Enter') {
+      event.preventDefault()
+      drawing.addPanelFromHover()
+      draw()
+      return
+    }
+  }
 
   if (key === 'm' || key === 'M') {
     app.setTool('move')
@@ -696,9 +747,13 @@ watch(() => [cabinet.state.width, cabinet.state.depth, cabinet.state.height, cab
   draw()
 })
 watch(() => [drawing.state.panels.length, drawing.state.zones.length, drawing.state.selectedPanelId, app.state.mini3DVisible], draw)
-watch(() => [box.state.boxes.length, box.state.selectedBoxId, box.state.editingDim, box.state.draft.active], draw)
+watch(() => [box.state.boxes.length, box.state.selectedBoxId, box.state.editingDim, box.state.draft.active], () => {
+  drawing.rebuildZones()
+  draw()
+})
 onMounted(() => {
   resizeCanvas()
+  drawing.rebuildZones()
   window.addEventListener('resize', resizeCanvas)
 })
 onBeforeUnmount(() => window.removeEventListener('resize', resizeCanvas))
