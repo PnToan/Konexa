@@ -43,7 +43,7 @@ import { useBoxStore } from '../../stores/useBoxStore'
 import { renderCanvas2D, getWallDimHit, getBoxDimHit } from '../../renderers/canvas-2d-renderer'
 import { screenToLocal, localToScreen } from '../../renderers/viewport-transform'
 import { projectBoxToCameraRect, cameraLocalToWorldPoint } from '../../core/view/view-camera'
-import { createMoveSnapResult, getPanelSnapPoints, hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
+import { createMoveSnapResult, createWallSnapResult, getPanelSnapPoints, hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
 import { handleViewportKey } from '../../commands/keyboard-controller'
 
 const app = useAppStore()
@@ -132,12 +132,25 @@ function draw() {
     boxDraftRect: box.getDraftRect(),
     boxEditingDim: box.state.editingDim,
     hover: drawing.state.hover,
+    snapPreview: drawing.state.snapPreview,
     selectedPanelId: drawing.state.selectedPanelId,
     selectedBoxId: box.state.selectedBoxId,
     showGrid: app.state.showGrid
   })
 } // End draw
+//=================
+function getBoxSnapLocal(local) {
+  if (app.state.currentTool !== 'box') return local
+  if (app.state.currentView !== 'top') return local
 
+  const wallRect = projectBoxToCameraRect(getWallBox3D(), app.state.currentView)
+  const tolerance = 18 / (app.state.viewport.localScale * app.state.viewport.zoom)
+  const snapResult = createWallSnapResult(local, wallRect, tolerance)
+
+  drawing.setSnapPreview(snapResult.active ? snapResult.snap : null)
+
+  return snapResult.point
+} // End getBoxSnapLocal
 //=================
 function localFromEvent(event) {
   const rect = canvasRef.value.getBoundingClientRect()
@@ -385,7 +398,8 @@ function onDimInputKeyDown(event) {
 //=================
 function onPointerDown(event) {
   viewportRef.value.focus()
-  const local = localFromEvent(event)
+  const rawLocal = localFromEvent(event)
+  const local = getBoxSnapLocal(rawLocal)
   const canvasRect = canvasRef.value.getBoundingClientRect()
   const screenX = event.clientX - canvasRect.left
   const screenY = event.clientY - canvasRect.top
@@ -460,17 +474,21 @@ function onPointerDown(event) {
   draw()
 
 } // End onPointerDown
+//=================
 function onPointerMove(event) {
-  const local = localFromEvent(event)
+  const rawLocal = localFromEvent(event)
+  const local = getBoxSnapLocal(rawLocal)
   const canvasRect = canvasRef.value.getBoundingClientRect()
   const screenX = event.clientX - canvasRect.left
   const screenY = event.clientY - canvasRect.top
+
   const wallDimHit = getWallDimHit(
     app.state.viewport,
     projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
     screenX,
     screenY
   )
+
   const boxDimHit = getBoxDimHit(
     app.state.viewport,
     box.state.boxes,
@@ -478,15 +496,24 @@ function onPointerMove(event) {
     screenY,
     app.state.currentView
   )
+
   hoverDim.value = boxDimHit || wallDimHit
 
-  if (app.state.currentTool === 'box' && box.state.draft.active) {
-    box.updateDraft(local)
+  if (app.state.currentTool === 'box') {
+    if (box.state.draft.active) {
+      box.updateDraft(local)
+    }
+
+    updateHover(rawLocal)
     draw()
     return
   }
+
   if (panning && panStart && panOriginal) {
-    app.setPan(panOriginal.x + event.clientX - panStart.x, panOriginal.y + event.clientY - panStart.y)
+    app.setPan(
+      panOriginal.x + event.clientX - panStart.x,
+      panOriginal.y + event.clientY - panStart.y
+    )
     draw()
     return
   }
@@ -507,7 +534,7 @@ function onPointerMove(event) {
   }
 
   drawing.clearSnapPreview()
-  updateHover(local)
+  updateHover(rawLocal)
   draw()
 } // End onPointerMove
 
@@ -521,6 +548,7 @@ function onPointerUp() {
   panning = false
   panStart = null
   panOriginal = null
+  drawing.clearSnapPreview()
   draw()
 } // End onPointerUp
 

@@ -244,3 +244,63 @@ export function createMoveSnapResult(localPoint, panels, movingPanelId = null, t
     snap
   }
 } // End createMoveSnapResult
+//=================
+function getRectSnapPoints(rect) {
+  if (!rect) return []
+
+  const left = rect.x
+  const right = rect.x + rect.width
+  const bottom = rect.y
+  const top = rect.y + rect.height
+  const centerX = rect.x + rect.width / 2
+  const centerY = rect.y + rect.height / 2
+
+  return [
+    { type: 'corner', key: 'bottom-left', x: left, y: bottom },
+    { type: 'corner', key: 'bottom-right', x: right, y: bottom },
+    { type: 'corner', key: 'top-right', x: right, y: top },
+    { type: 'corner', key: 'top-left', x: left, y: top },
+    { type: 'edge', key: 'mid-bottom', x: centerX, y: bottom },
+    { type: 'edge', key: 'mid-top', x: centerX, y: top },
+    { type: 'edge', key: 'mid-left', x: left, y: centerY },
+    { type: 'edge', key: 'mid-right', x: right, y: centerY }
+  ]
+} // End getRectSnapPoints
+
+//=================
+export function createWallSnapResult(localPoint, wallRect, tolerance = DEFAULT_SNAP_TOLERANCE) {
+  const targets = getRectSnapPoints(wallRect)
+  let bestSnap = null
+
+  targets.forEach((target) => {
+    const distance = distanceBetweenPoints(localPoint, target)
+
+    if (distance > tolerance) return
+    if (bestSnap && distance >= bestSnap.distance) return
+
+    bestSnap = {
+      type: target.type,
+      key: target.key,
+      x: target.x,
+      y: target.y,
+      distance
+    }
+  })
+
+  if (!bestSnap) {
+    return {
+      active: false,
+      point: localPoint,
+      snap: null
+    }
+  }
+
+  return {
+    active: true,
+    point: {
+      x: bestSnap.x,
+      y: bestSnap.y
+    },
+    snap: bestSnap
+  }
+} // End createWallSnapResult
