@@ -119,7 +119,7 @@ const store = createSimpleStore({
   currentLibraryMain: 'library',
   status: 'Sẵn sàng',
   showGrid: true,
-  mini3DVisible: true,
+  mini3DVisible: false,
   commandBuffer: '',
   mouse: { x: 0, y: 0, localX: 0, localY: 0 },
   viewport: {

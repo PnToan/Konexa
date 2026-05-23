@@ -29,9 +29,6 @@
     <div class="mn-axis-widget" title="3D Preview">
       <div class="mn-joystick-outer"><div class="mn-joystick-inner"><span class="mn-joystick-label">3D</span></div></div>
     </div>
-    <div class="mn-viewport-info">
-      Tool: {{ app.getActiveToolLabel() }} | Mặt: {{ app.getActiveViewLabel() }} ({{ app.getActiveViewAxesText() }}) | {{ axisHorizontal }}: {{ localX }} | {{ axisVertical }}: {{ localY }} | Zoom: {{ zoomLabel }}
-    </div>
   </main>
 </template>
 

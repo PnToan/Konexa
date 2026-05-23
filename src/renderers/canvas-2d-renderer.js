@@ -330,8 +330,6 @@ export function renderCanvas2D(ctx, payload) {
     drawWallDims(ctx, viewport, wallRect, wallEditingDim)
   }
 
-  drawZoneOverlay(ctx, viewport, zones, hover)
-
   drawPanels(ctx, viewport, panels, selectedPanelId)
 
   drawRulers(ctx, viewport, width, height)
