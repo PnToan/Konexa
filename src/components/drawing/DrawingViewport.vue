@@ -21,6 +21,19 @@
       @keydown="onDimInputKeyDown"
       @blur="cancelDimInput"
     />
+
+    <input
+      v-if="boxHeightInput.active"
+      ref="boxHeightInputRef"
+      type="number"
+      class="mn-dim-input"
+      :style="boxHeightInputStyle"
+      v-model="boxHeightInput.value"
+      placeholder="Cao Box"
+      @keydown="onBoxHeightInputKeyDown"
+      @blur="cancelBoxHeightInput"
+    />
+
     <Mini3DPreview v-if="app.state.mini3DVisible" />
     <div class="mn-quick-view-bar">
       <button v-for="view in views" :key="view.id" class="mn-quick-view-btn" :class="{ active: app.state.currentView === view.id }" @click="app.setView(view.id)">{{ view.label }}</button>
@@ -54,6 +67,8 @@ const box = useBoxStore()
 const viewportRef = ref(null)
 const canvasRef = ref(null)
 const dimInputRef = ref(null)
+const boxHeightInputRef = ref(null)
+
 const dimInput = ref({
   active: false,
   key: null,
@@ -61,6 +76,14 @@ const dimInput = ref({
   y: 0,
   value: ''
 })
+
+const boxHeightInput = ref({
+  active: false,
+  x: 0,
+  y: 0,
+  value: ''
+})
+
 const hoverDim = ref(null)
 let ctx = null
 let ratio = 1
@@ -83,9 +106,9 @@ function getWallBox3D() {
 const activeViewConfig = computed(() => app.getViewConfig(app.state.currentView))
 const axisHorizontal = computed(() => activeViewConfig.value.axisA || 'X')
 const axisVertical = computed(() => activeViewConfig.value.axisB || 'Y')
-const dimInputStyle = computed(() => ({
-  left: `${dimInput.value.x}px`,
-  top: `${dimInput.value.y}px`
+const boxHeightInputStyle = computed(() => ({
+  left: `${boxHeightInput.value.x}px`,
+  top: `${boxHeightInput.value.y}px`
 }))
 const canvasCursorClass = computed(() => {
   if (hoverDim.value) return 'mn-cursor-pointer'
@@ -494,6 +517,60 @@ function cancelDimInput() {
   draw()
 } // End cancelDimInput
 //=================
+function openBoxHeightInput(event) {
+  boxHeightInput.value.active = true
+  boxHeightInput.value.x = event.clientX + 12
+  boxHeightInput.value.y = event.clientY + 12
+  boxHeightInput.value.value = String(wall.state.height || 600)
+
+  nextTick(() => {
+    boxHeightInputRef.value?.focus()
+    boxHeightInputRef.value?.select()
+  })
+}
+// End openBoxHeightInput
+//=================
+function cancelBoxHeightInput() {
+  boxHeightInput.value.active = false
+  boxHeightInput.value.value = ''
+  box.cancelDraft()
+  draw()
+}
+// End cancelBoxHeightInput
+
+//=================
+function commitBoxHeightInput() {
+  const height = Number(boxHeightInput.value.value)
+
+  if (!Number.isFinite(height) || height <= 0) {
+    cancelBoxHeightInput()
+    return
+  }
+
+  box.commitDraft(height)
+  boxHeightInput.value.active = false
+  boxHeightInput.value.value = ''
+
+  drawing.rebuildZones()
+  draw()
+}
+// End commitBoxHeightInput
+
+//=================
+function onBoxHeightInputKeyDown(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    commitBoxHeightInput()
+    return
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    cancelBoxHeightInput()
+  }
+}
+// End onBoxHeightInputKeyDown
+//=================
 function commitDimInput() {
   const numberValue = Number(dimInput.value.value)
   if (!Number.isFinite(numberValue) || numberValue <= 0) {
@@ -567,6 +644,16 @@ function onPointerDown(event) {
   }
 
   if (app.state.currentTool === 'box') {
+    if (app.state.currentView !== 'top') {
+      app.setStatus('Box chỉ tạo ở mặt Trên')
+      draw()
+      return
+    }
+
+    if (boxHeightInput.value.active) {
+      return
+    }
+
     if (!box.state.draft.active) {
       box.startDraft(local)
       app.setStatus('Box: chọn điểm góc thứ hai')
@@ -575,16 +662,8 @@ function onPointerDown(event) {
     }
 
     box.updateDraft(local)
-
-    const newBox = box.commitDraft(wall.state.height)
-
-    if (newBox) {
-      drawing.rebuildZones()
-      app.setStatus(`Đã tạo ${newBox.name}`)
-    } else {
-      app.setStatus('Box quá nhỏ, chưa tạo')
-    }
-
+    openBoxHeightInput(event)
+    app.setStatus('Nhập chiều cao Box rồi nhấn Enter')
     draw()
     return
   }
