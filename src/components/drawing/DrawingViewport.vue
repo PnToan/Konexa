@@ -300,7 +300,7 @@ function getExistingBoxSnapResult(local, tolerance = 18) {
   }
 
   const scale = app.state.viewport.localScale * app.state.viewport.zoom
-  const toleranceLocal = tolerance / scale
+  const toleranceLocal = tolerance / Math.max(0.0001, scale)
 
   let best = null
 
@@ -317,10 +317,10 @@ function getExistingBoxSnapResult(local, tolerance = 18) {
     const top = rect.y + rect.height
 
     const points = [
-      { type: 'box-corner', key: 'bottom-left', x: left, y: bottom },
-      { type: 'box-corner', key: 'bottom-right', x: right, y: bottom },
-      { type: 'box-corner', key: 'top-right', x: right, y: top },
-      { type: 'box-corner', key: 'top-left', x: left, y: top }
+      { type: 'corner', key: 'box-bottom-left', x: left, y: bottom },
+      { type: 'corner', key: 'box-bottom-right', x: right, y: bottom },
+      { type: 'corner', key: 'box-top-right', x: right, y: top },
+      { type: 'corner', key: 'box-top-left', x: left, y: top }
     ]
 
     for (const target of points) {
@@ -337,26 +337,26 @@ function getExistingBoxSnapResult(local, tolerance = 18) {
 
     const edges = [
       {
-        type: 'box-edge',
-        key: 'bottom',
+        type: 'edge',
+        key: 'box-bottom',
         x: clampValue(local.x, left, right),
         y: bottom
       },
       {
-        type: 'box-edge',
-        key: 'top',
+        type: 'edge',
+        key: 'box-top',
         x: clampValue(local.x, left, right),
         y: top
       },
       {
-        type: 'box-edge',
-        key: 'left',
+        type: 'edge',
+        key: 'box-left',
         x: left,
         y: clampValue(local.y, bottom, top)
       },
       {
-        type: 'box-edge',
-        key: 'right',
+        type: 'edge',
+        key: 'box-right',
         x: right,
         y: clampValue(local.y, bottom, top)
       }
@@ -855,6 +855,11 @@ function onPointerMove(event) {
     const local = getBoxSnapLocal(rawLocal)
 
     hoverDim.value = null
+
+    if (boxHeightInput.value.active) {
+      draw()
+      return
+    }
 
     if (box.state.draft.active) {
       box.updateDraft(local)
