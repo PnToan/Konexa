@@ -14,20 +14,16 @@ function drawLine(ctx, a, b, color = '#999', width = 1) {
 //=================
 function drawRectLocal(ctx, viewport, rect, options = {}) {
   if (!rect) return
-
   const p1 = localToScreen(viewport, rect.x, rect.y)
   const p2 = localToScreen(viewport, rect.x + rect.width, rect.y + rect.height)
-
   const x = Math.min(p1.x, p2.x)
   const y = Math.min(p1.y, p2.y)
   const w = Math.abs(p2.x - p1.x)
   const h = Math.abs(p2.y - p1.y)
-
   if (options.fill) {
     ctx.fillStyle = options.fill
     ctx.fillRect(x, y, w, h)
   }
-
   if (options.stroke) {
     ctx.strokeStyle = options.stroke
     ctx.lineWidth = options.lineWidth || 1
