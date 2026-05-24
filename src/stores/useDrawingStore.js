@@ -15,7 +15,7 @@ import {
   commitMoveToTarget,
   createMoveState,
   previewMoveToTarget,
-  startMoveFromBasePoint,
+  startMoveFromHover,
   updateMoveHover
 } from '../core/tools/moveTool'
 
@@ -527,85 +527,110 @@ const store = createSimpleStore({
   }, // End resetMoveTool
 
   //=================
-  updateMoveToolHover(localPoint, viewport) {
+  updateMoveToolHover(localPoint, viewport, currentView = 'front') {
+    const boxStore = useBoxStore()
+
     state.move = updateMoveHover(
       state.move,
       state.panels,
+      boxStore.state.boxes,
       localPoint,
-      viewport
+      viewport,
+      currentView
     )
 
     state.snapPreview = null
   }, // End updateMoveToolHover
 
   //=================
-  startCadMoveFromHover(localPoint, viewport) {
-    const hoverState = updateMoveHover(
+  startCadMoveFromHover(localPoint, viewport, currentView = 'front') {
+    const boxStore = useBoxStore()
+
+    state.move = startMoveFromHover(
       state.move,
       state.panels,
+      boxStore.state.boxes,
       localPoint,
-      viewport
+      viewport,
+      currentView
     )
 
-    if (!hoverState.hoverPanelId || !hoverState.hoverBasePoint) {
-      state.move = hoverState
+    if (!state.move.active || !state.move.targetId) {
+      useAppStore().setStatus('Move: hãy chọn đúng điểm snap')
       return null
     }
 
-    const panel = state.panels.find((item) => item.id === hoverState.hoverPanelId)
-
-    if (!panel) {
-      state.move = hoverState
-      return null
+    if (state.move.targetType === 'panel') {
+      state.selectedPanelId = state.move.targetId
+      boxStore.clearSelection()
     }
 
-    state.move = startMoveFromBasePoint(
-      hoverState,
-      panel,
-      hoverState.hoverBasePoint
-    )
+    if (state.move.targetType === 'box') {
+      state.selectedPanelId = null
+      boxStore.selectBox(state.move.targetId)
+    }
 
-    state.selectedPanelId = panel.id
     state.snapPreview = null
     useAppStore().setStatus('Move: đã chọn điểm gốc')
 
-    return panel
+    return {
+      type: state.move.targetType,
+      id: state.move.targetId
+    }
   }, // End startCadMoveFromHover
 
   //=================
-  previewCadMove(localPoint, lockAxis = false) {
+  previewCadMove(localPoint, viewport, lockAxis = false, currentView = 'front') {
+    const boxStore = useBoxStore()
+
     state.move = previewMoveToTarget(
       state.move,
       state.panels,
+      boxStore.state.boxes,
       localPoint,
-      lockAxis
+      viewport,
+      lockAxis,
+      currentView
     )
 
-    state.snapPreview = state.move.snapPreview || null
+    state.snapPreview = state.move.targetSnap || null
 
-    return state.move.previewPanel || null
+    return state.move.previewTarget || null
   }, // End previewCadMove
 
   //=================
-  commitCadMove(localPoint, lockAxis = false) {
+  commitCadMove(localPoint, viewport, lockAxis = false, currentView = 'front') {
+    const boxStore = useBoxStore()
+
     const result = commitMoveToTarget(
       state.move,
       state.panels,
+      boxStore.state.boxes,
       localPoint,
-      lockAxis
+      viewport,
+      lockAxis,
+      currentView
     )
 
     state.move = result.moveState
     state.panels = result.panels
+    boxStore.setBoxes(result.boxes)
     state.snapPreview = null
 
-    if (result.movedPanel) {
-      state.selectedPanelId = result.movedPanel.id
+    if (result.movedTarget?.type === 'panel') {
+      state.selectedPanelId = result.movedTarget.id
+      boxStore.clearSelection()
       this.rebuildZones()
       useAppStore().setStatus('Đã di chuyển tấm')
     }
 
-    return result.movedPanel
+    if (result.movedTarget?.type === 'box') {
+      state.selectedPanelId = null
+      boxStore.selectBox(result.movedTarget.id)
+      useAppStore().setStatus('Đã di chuyển Box')
+    }
+
+    return result.movedTarget
   }, // End commitCadMove
 
   //=================
@@ -615,13 +640,16 @@ const store = createSimpleStore({
     useAppStore().setStatus('Đã hủy Move')
   }, // End cancelCadMove
 
-  //=================
-  getMovePreviewPanel() {
+   //=================
+  getMovePreviewTarget() {
     if (!state.move.active) return null
     if (state.move.phase !== 'pick-target') return null
 
-    return state.move.previewPanel || null
-  }, // End getMovePreviewPanel
+    return {
+      type: state.move.targetType,
+      target: state.move.previewTarget || null
+    }
+  }, // End getMovePreviewTarget
 
   //=================
   getMoveHoverSnapPoints() {
@@ -629,7 +657,19 @@ const store = createSimpleStore({
 
     return state.move.hoverSnapPoints || []
   }, // End getMoveHoverSnapPoints
+  //=================
+  getMoveCursorLocal() {
+    if (!state.move) return null
 
+    return state.move.cursorLocal || null
+  }, // End getMoveCursorLocal
+
+  //=================
+  getMoveTargetSnap() {
+    if (!state.move) return null
+
+    return state.move.targetSnap || null
+  }, // End getMoveTargetSnap
   //=================
   isCadMovePickingTarget() {
     return state.move?.active === true && state.move?.phase === 'pick-target'

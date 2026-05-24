@@ -1,20 +1,52 @@
-import { movePanelByDelta } from '../panel/panel-engine'
-import { createMoveSnapResult, getPanelSnapPoints, hitTestPanel } from '../snap/snap-engine'
+import { getCameraConfig, projectBoxToCameraRect } from '../view/view-camera'
+
+const DEFAULT_MOVE_SNAP_TOLERANCE = 28
+
+//=================
+function toNumber(value, fallback = 0) {
+  const numberValue = Number(value)
+
+  if (!Number.isFinite(numberValue)) return fallback
+
+  return numberValue
+} // End toNumber
+
+//=================
+function distanceBetweenPoints(a, b) {
+  const dx = toNumber(a?.x) - toNumber(b?.x)
+  const dy = toNumber(a?.y) - toNumber(b?.y)
+
+  return Math.sqrt(dx * dx + dy * dy)
+} // End distanceBetweenPoints
+
+//=================
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
+} // End clamp
 
 //=================
 export function createMoveState() {
   return {
     active: false,
     phase: 'pick-base',
-    panelId: null,
+
+    targetType: null,
+    targetId: null,
+
+    baseSnap: null,
     basePoint: null,
     targetPoint: null,
-    originalPanel: null,
-    previewPanel: null,
-    hoverPanelId: null,
+
+    originalTarget: null,
+    previewTarget: null,
+
+    hoverTargetType: null,
+    hoverTargetId: null,
+    hoverSnap: null,
     hoverSnapPoints: [],
-    hoverBasePoint: null,
-    snapPreview: null,
+
+    targetSnap: null,
+    cursorLocal: null,
     lockAxis: null
   }
 } // End createMoveState
@@ -26,133 +58,477 @@ export function resetMoveState() {
 
 //=================
 export function getMoveTolerance(viewport) {
-  const scale = Number(viewport.localScale || 1) * Number(viewport.zoom || 1)
-  return 14 / Math.max(scale, 0.0001)
+  const scale = Number(viewport?.localScale || 1) * Number(viewport?.zoom || 1)
+
+  return DEFAULT_MOVE_SNAP_TOLERANCE / Math.max(scale, 0.0001)
 } // End getMoveTolerance
 
 //=================
-export function getPanelCornerSnapPoints(panel) {
-  if (!panel) return []
+function getPanelAxisMin(panel, axis) {
+  if (axis === 'x') return toNumber(panel.x3d ?? panel.x, 0)
+  if (axis === 'y') return toNumber(panel.y3d ?? panel.worldY ?? panel.depthY ?? panel.y, 0)
+  if (axis === 'z') return toNumber(panel.z3d ?? panel.z ?? panel.y, 0)
 
-  return getPanelSnapPoints(panel)
-    .filter((snapPoint) => snapPoint.type === 'corner')
-    .map((snapPoint, index) => ({
-      ...snapPoint,
-      id: `${panel.id}_corner_${index}`,
-      panelId: panel.id
-    }))
-} // End getPanelCornerSnapPoints
+  return 0
+} // End getPanelAxisMin
 
 //=================
-export function getNearestMoveSnapPoint(panel, localPoint, viewport) {
-  if (!panel || !localPoint) return null
+function getPanelAxisSize(panel, axis) {
+  if (axis === 'x') return toNumber(panel.xSize ?? panel.width, 0)
+  if (axis === 'y') return toNumber(panel.ySize ?? panel.depth, 0)
+  if (axis === 'z') return toNumber(panel.zSize ?? panel.height ?? panel.thickness, 0)
 
-  const tolerance = getMoveTolerance(viewport)
-  const snapPoints = getPanelCornerSnapPoints(panel)
+  return 0
+} // End getPanelAxisSize
 
+//=================
+function projectPanelAxisValue(value, size, reverse) {
+  if (reverse) return -(value + size)
+
+  return value
+} // End projectPanelAxisValue
+
+//=================
+function getPanelViewRect(panel, currentView = 'front') {
+  if (!panel) return null
+
+  const camera = getCameraConfig(currentView)
+  const uMin = getPanelAxisMin(panel, camera.axisU)
+  const vMin = getPanelAxisMin(panel, camera.axisV)
+  const uSize = getPanelAxisSize(panel, camera.axisU)
+  const vSize = getPanelAxisSize(panel, camera.axisV)
+
+  if (uSize <= 0 || vSize <= 0) return null
+
+  return {
+    x: projectPanelAxisValue(uMin, uSize, camera.reverseU),
+    y: projectPanelAxisValue(vMin, vSize, camera.reverseV),
+    width: uSize,
+    height: vSize
+  }
+} // End getPanelViewRect
+
+//=================
+function getBoxViewRect(box, currentView = 'top') {
+  if (!box) return null
+
+  return projectBoxToCameraRect(box, currentView)
+} // End getBoxViewRect
+
+//=================
+function getMoveTargetRect(targetType, target, currentView) {
+  if (targetType === 'panel') return getPanelViewRect(target, currentView)
+  if (targetType === 'box') return getBoxViewRect(target, currentView)
+
+  return null
+} // End getMoveTargetRect
+
+//=================
+function pointInRect(rect, point) {
+  if (!rect || !point) return false
+
+  return point.x >= rect.x
+    && point.x <= rect.x + rect.width
+    && point.y >= rect.y
+    && point.y <= rect.y + rect.height
+} // End pointInRect
+
+//=================
+function getRectCornerSnapPoints(rect, meta = {}) {
+  if (!rect) return []
+
+  const left = rect.x
+  const right = rect.x + rect.width
+  const bottom = rect.y
+  const top = rect.y + rect.height
+
+  return [
+    { type: 'corner', key: 'bottom-left', x: left, y: bottom },
+    { type: 'corner', key: 'bottom-right', x: right, y: bottom },
+    { type: 'corner', key: 'top-right', x: right, y: top },
+    { type: 'corner', key: 'top-left', x: left, y: top }
+  ].map((snapPoint, index) => ({
+    ...snapPoint,
+    ...meta,
+    id: `${meta.targetType}_${meta.targetId}_corner_${index}`
+  }))
+} // End getRectCornerSnapPoints
+
+//=================
+function getRectSnapEdges(rect, meta = {}) {
+  if (!rect) return []
+
+  const left = rect.x
+  const right = rect.x + rect.width
+  const bottom = rect.y
+  const top = rect.y + rect.height
+
+  return [
+    {
+      type: 'edge',
+      key: 'bottom',
+      orientation: 'horizontal',
+      x1: left,
+      y1: bottom,
+      x2: right,
+      y2: bottom
+    },
+    {
+      type: 'edge',
+      key: 'top',
+      orientation: 'horizontal',
+      x1: left,
+      y1: top,
+      x2: right,
+      y2: top
+    },
+    {
+      type: 'edge',
+      key: 'left',
+      orientation: 'vertical',
+      x1: left,
+      y1: bottom,
+      x2: left,
+      y2: top
+    },
+    {
+      type: 'edge',
+      key: 'right',
+      orientation: 'vertical',
+      x1: right,
+      y1: bottom,
+      x2: right,
+      y2: top
+    }
+  ].map((edge) => ({
+    ...edge,
+    ...meta
+  }))
+} // End getRectSnapEdges
+
+//=================
+function getMoveTargetSnapPoints(targetType, target, currentView) {
+  const rect = getMoveTargetRect(targetType, target, currentView)
+
+  if (!rect) return []
+
+  return getRectCornerSnapPoints(rect, {
+    targetType,
+    targetId: target.id
+  })
+} // End getMoveTargetSnapPoints
+
+//=================
+function getNearestSnapPoint(snapPoints, localPoint, tolerance) {
   let best = null
 
-  for (const snapPoint of snapPoints) {
-    const dx = Number(localPoint.x) - Number(snapPoint.x)
-    const dy = Number(localPoint.y) - Number(snapPoint.y)
-    const distance = Math.sqrt(dx * dx + dy * dy)
+  snapPoints.forEach((snapPoint) => {
+    const distance = distanceBetweenPoints(localPoint, snapPoint)
 
-    if (distance > tolerance) continue
-    if (best && distance >= best.distance) continue
+    if (distance > tolerance) return
+    if (best && distance >= best.distance) return
 
     best = {
       ...snapPoint,
       distance
     }
-  }
+  })
 
   return best
-} // End getNearestMoveSnapPoint
+} // End getNearestSnapPoint
 
 //=================
-export function getMoveHoverResult(panels, localPoint, viewport) {
-  const panelHit = hitTestPanel(panels, localPoint)
+function collectHoverSnapCandidates(panels = [], boxes = [], localPoint, currentView) {
+  const candidates = []
 
-  if (!panelHit?.panel) {
+  panels.forEach((panel) => {
+    const rect = getPanelViewRect(panel, currentView)
+
+    if (!rect) return
+    if (!pointInRect(rect, localPoint)) return
+
+    candidates.push({
+      targetType: 'panel',
+      target: panel,
+      rect,
+      snapPoints: getMoveTargetSnapPoints('panel', panel, currentView)
+    })
+  })
+
+  boxes.forEach((box) => {
+    const rect = getBoxViewRect(box, currentView)
+
+    if (!rect) return
+    if (!pointInRect(rect, localPoint)) return
+
+    candidates.push({
+      targetType: 'box',
+      target: box,
+      rect,
+      snapPoints: getMoveTargetSnapPoints('box', box, currentView)
+    })
+  })
+
+  return candidates
+} // End collectHoverSnapCandidates
+
+//=================
+export function getMoveHoverResult(panels = [], boxes = [], localPoint, viewport, currentView = 'front') {
+  const tolerance = getMoveTolerance(viewport)
+  const candidates = collectHoverSnapCandidates(panels, boxes, localPoint, currentView)
+
+  let best = null
+
+  candidates.forEach((candidate) => {
+    const snap = getNearestSnapPoint(candidate.snapPoints, localPoint, tolerance)
+
+    if (!snap) {
+      if (!best) {
+        best = {
+          ...candidate,
+          snap: null,
+          distance: Infinity
+        }
+      }
+
+      return
+    }
+
+    if (best?.snap && snap.distance >= best.snap.distance) return
+
+    best = {
+      ...candidate,
+      snap,
+      distance: snap.distance
+    }
+  })
+
+  if (!best) {
     return {
-      panel: null,
-      basePoint: null,
+      targetType: null,
+      target: null,
+      snap: null,
       snapPoints: []
     }
   }
 
-  const panel = panelHit.panel
-  const snapPoints = getPanelCornerSnapPoints(panel)
-  const snapPoint = getNearestMoveSnapPoint(panel, localPoint, viewport)
-
   return {
-    panel,
-    basePoint: snapPoint || {
-      type: 'free',
-      panelId: panel.id,
-      x: localPoint.x,
-      y: localPoint.y
-    },
-    snapPoints
+    targetType: best.targetType,
+    target: best.target,
+    snap: best.snap,
+    snapPoints: best.snapPoints
   }
 } // End getMoveHoverResult
 
 //=================
-export function updateMoveHover(moveState, panels, localPoint, viewport) {
-  const hover = getMoveHoverResult(panels, localPoint, viewport)
+export function updateMoveHover(moveState, panels = [], boxes = [], localPoint, viewport, currentView = 'front') {
+  const hover = getMoveHoverResult(
+    panels,
+    boxes,
+    localPoint,
+    viewport,
+    currentView
+  )
 
   return {
     ...moveState,
-    hoverPanelId: hover.panel?.id || null,
-    hoverSnapPoints: hover.snapPoints,
-    hoverBasePoint: hover.basePoint
+    cursorLocal: localPoint ? { ...localPoint } : null,
+    hoverTargetType: hover.targetType,
+    hoverTargetId: hover.target?.id || null,
+    hoverSnap: hover.snap,
+    hoverSnapPoints: hover.snapPoints || []
   }
 } // End updateMoveHover
 
 //=================
-export function startMoveFromBasePoint(moveState, panel, basePoint) {
-  if (!panel || !basePoint) return moveState
+export function startMoveFromHover(moveState, panels = [], boxes = [], localPoint, viewport, currentView = 'front') {
+  const hoverState = updateMoveHover(
+    moveState,
+    panels,
+    boxes,
+    localPoint,
+    viewport,
+    currentView
+  )
+
+  if (!hoverState.hoverSnap) {
+    return hoverState
+  }
+
+  const targetType = hoverState.hoverSnap.targetType
+  const targetId = hoverState.hoverSnap.targetId
+  const source = targetType === 'panel' ? panels : boxes
+  const target = source.find((item) => item.id === targetId)
+
+  if (!target) return hoverState
 
   return {
-    ...moveState,
+    ...hoverState,
     active: true,
     phase: 'pick-target',
-    panelId: panel.id,
+
+    targetType,
+    targetId,
+
+    baseSnap: { ...hoverState.hoverSnap },
     basePoint: {
-      x: Number(basePoint.x),
-      y: Number(basePoint.y)
+      x: toNumber(hoverState.hoverSnap.x),
+      y: toNumber(hoverState.hoverSnap.y)
     },
     targetPoint: {
-      x: Number(basePoint.x),
-      y: Number(basePoint.y)
+      x: toNumber(hoverState.hoverSnap.x),
+      y: toNumber(hoverState.hoverSnap.y)
     },
-    originalPanel: { ...panel },
-    previewPanel: { ...panel },
-    hoverPanelId: panel.id,
+
+    originalTarget: { ...target },
+    previewTarget: { ...target },
+
+    hoverSnap: null,
     hoverSnapPoints: [],
-    hoverBasePoint: null,
-    snapPreview: null,
+    targetSnap: null,
     lockAxis: null
   }
-} // End startMoveFromBasePoint
+} // End startMoveFromHover
 
 //=================
-export function resolveMoveTargetPoint(localPoint, panels, movingPanelId) {
-  const snapResult = createMoveSnapResult(localPoint, panels, movingPanelId)
+function collectTargetSnapSources(panels = [], boxes = [], movingType, movingId, currentView = 'front') {
+  const points = []
+  const edges = []
 
-  if (snapResult?.active) {
+  panels.forEach((panel) => {
+    if (!panel || (movingType === 'panel' && panel.id === movingId)) return
+
+    const rect = getPanelViewRect(panel, currentView)
+
+    if (!rect) return
+
+    const meta = {
+      targetType: 'panel',
+      targetId: panel.id
+    }
+
+    points.push(...getRectCornerSnapPoints(rect, meta))
+    edges.push(...getRectSnapEdges(rect, meta))
+  })
+
+  boxes.forEach((box) => {
+    if (!box || (movingType === 'box' && box.id === movingId)) return
+
+    const rect = getBoxViewRect(box, currentView)
+
+    if (!rect) return
+
+    const meta = {
+      targetType: 'box',
+      targetId: box.id
+    }
+
+    points.push(...getRectCornerSnapPoints(rect, meta))
+    edges.push(...getRectSnapEdges(rect, meta))
+  })
+
+  return {
+    points,
+    edges
+  }
+} // End collectTargetSnapSources
+
+//=================
+function findNearestPointSnap(localPoint, targets, tolerance) {
+  let best = null
+
+  targets.points.forEach((target) => {
+    const distance = distanceBetweenPoints(localPoint, target)
+
+    if (distance > tolerance) return
+    if (best && distance >= best.distance) return
+
+    best = {
+      ...target,
+      type: 'corner',
+      distance
+    }
+  })
+
+  return best
+} // End findNearestPointSnap
+
+//=================
+function findNearestEdgeSnap(localPoint, targets, tolerance) {
+  let best = null
+
+  targets.edges.forEach((edge) => {
+    let snapPoint = null
+
+    if (edge.orientation === 'horizontal') {
+      snapPoint = {
+        x: clamp(localPoint.x, edge.x1, edge.x2),
+        y: edge.y1
+      }
+    }
+
+    if (edge.orientation === 'vertical') {
+      snapPoint = {
+        x: edge.x1,
+        y: clamp(localPoint.y, edge.y1, edge.y2)
+      }
+    }
+
+    if (!snapPoint) return
+
+    const distance = distanceBetweenPoints(localPoint, snapPoint)
+
+    if (distance > tolerance) return
+    if (best && distance >= best.distance) return
+
+    best = {
+      type: 'edge',
+      key: edge.key,
+      orientation: edge.orientation,
+      targetType: edge.targetType,
+      targetId: edge.targetId,
+      x: snapPoint.x,
+      y: snapPoint.y,
+      distance
+    }
+  })
+
+  return best
+} // End findNearestEdgeSnap
+
+//=================
+function resolveMoveTargetPoint(moveState, panels = [], boxes = [], localPoint, viewport, currentView = 'front') {
+  const tolerance = getMoveTolerance(viewport)
+  const targets = collectTargetSnapSources(
+    panels,
+    boxes,
+    moveState.targetType,
+    moveState.targetId,
+    currentView
+  )
+
+  const pointSnap = findNearestPointSnap(localPoint, targets, tolerance)
+  const edgeSnap = findNearestEdgeSnap(localPoint, targets, tolerance)
+  const bestSnap = pointSnap && edgeSnap
+    ? pointSnap.distance <= edgeSnap.distance ? pointSnap : edgeSnap
+    : pointSnap || edgeSnap
+
+  if (!bestSnap) {
     return {
-      point: snapResult.point,
-      snapPreview: snapResult.snap
+      point: {
+        x: toNumber(localPoint.x),
+        y: toNumber(localPoint.y)
+      },
+      snap: null
     }
   }
 
   return {
     point: {
-      x: Number(localPoint.x),
-      y: Number(localPoint.y)
+      x: bestSnap.x,
+      y: bestSnap.y
     },
-    snapPreview: null
+    snap: bestSnap
   }
 } // End resolveMoveTargetPoint
 
@@ -162,78 +538,214 @@ export function getAxisLockedPoint(basePoint, targetPoint, lockAxis) {
     return targetPoint
   }
 
-  const dx = Number(targetPoint.x) - Number(basePoint.x)
-  const dy = Number(targetPoint.y) - Number(basePoint.y)
+  const dx = toNumber(targetPoint.x) - toNumber(basePoint.x)
+  const dy = toNumber(targetPoint.y) - toNumber(basePoint.y)
 
   if (Math.abs(dx) >= Math.abs(dy)) {
     return {
-      x: Number(targetPoint.x),
-      y: Number(basePoint.y)
+      x: toNumber(targetPoint.x),
+      y: toNumber(basePoint.y)
     }
   }
 
   return {
-    x: Number(basePoint.x),
-    y: Number(targetPoint.y)
+    x: toNumber(basePoint.x),
+    y: toNumber(targetPoint.y)
   }
 } // End getAxisLockedPoint
 
 //=================
-export function previewMoveToTarget(moveState, panels, localPoint, lockAxis = false) {
+function getWorldDeltaFromViewDelta(dx, dy, currentView = 'front') {
+  const camera = getCameraConfig(currentView)
+
+  return {
+    axisU: camera.axisU,
+    axisV: camera.axisV,
+    deltaU: camera.reverseU ? -dx : dx,
+    deltaV: camera.reverseV ? -dy : dy
+  }
+} // End getWorldDeltaFromViewDelta
+
+//=================
+function applyPanelAxisDelta(panel, axis, delta) {
+  const next = { ...panel }
+
+  if (axis === 'x') {
+    next.x3d = toNumber(next.x3d ?? next.x, 0) + delta
+    next.x = toNumber(next.x ?? next.x3d, 0) + delta
+  }
+
+  if (axis === 'y') {
+    next.y3d = toNumber(next.y3d ?? next.worldY ?? next.depthY ?? next.y, 0) + delta
+    next.worldY = toNumber(next.worldY ?? next.y3d, next.y3d) + delta
+    next.depthY = toNumber(next.depthY ?? next.y3d, next.y3d) + delta
+  }
+
+  if (axis === 'z') {
+    next.z3d = toNumber(next.z3d ?? next.z ?? next.y, 0) + delta
+    next.z = toNumber(next.z ?? next.z3d, 0) + delta
+    next.y = toNumber(next.y ?? next.z3d, 0) + delta
+  }
+
+  return next
+} // End applyPanelAxisDelta
+
+//=================
+function movePanelByViewDelta(panel, dx, dy, currentView = 'front') {
+  const worldDelta = getWorldDeltaFromViewDelta(dx, dy, currentView)
+  let nextPanel = { ...panel }
+
+  nextPanel = applyPanelAxisDelta(nextPanel, worldDelta.axisU, worldDelta.deltaU)
+  nextPanel = applyPanelAxisDelta(nextPanel, worldDelta.axisV, worldDelta.deltaV)
+
+  return nextPanel
+} // End movePanelByViewDelta
+
+//=================
+function applyBoxAxisDelta(box, axis, delta) {
+  const next = { ...box }
+
+  if (axis === 'x') {
+    next.x = toNumber(next.x, 0) + delta
+    next.x3d = toNumber(next.x3d ?? next.x, next.x) + delta
+  }
+
+  if (axis === 'y') {
+    next.y = toNumber(next.y, 0) + delta
+    next.y3d = toNumber(next.y3d ?? next.y, next.y) + delta
+  }
+
+  if (axis === 'z') {
+    next.z = toNumber(next.z, 0) + delta
+    next.z3d = toNumber(next.z3d ?? next.z, next.z) + delta
+  }
+
+  return next
+} // End applyBoxAxisDelta
+
+//=================
+function moveBoxByViewDelta(box, dx, dy, currentView = 'top') {
+  const worldDelta = getWorldDeltaFromViewDelta(dx, dy, currentView)
+  let nextBox = { ...box }
+
+  nextBox = applyBoxAxisDelta(nextBox, worldDelta.axisU, worldDelta.deltaU)
+  nextBox = applyBoxAxisDelta(nextBox, worldDelta.axisV, worldDelta.deltaV)
+
+  return nextBox
+} // End moveBoxByViewDelta
+
+//=================
+function moveTargetByViewDelta(targetType, target, dx, dy, currentView = 'front') {
+  if (targetType === 'panel') {
+    return movePanelByViewDelta(target, dx, dy, currentView)
+  }
+
+  if (targetType === 'box') {
+    return moveBoxByViewDelta(target, dx, dy, currentView)
+  }
+
+  return target
+} // End moveTargetByViewDelta
+
+//=================
+export function previewMoveToTarget(moveState, panels = [], boxes = [], localPoint, viewport, lockAxis = false, currentView = 'front') {
   if (!moveState.active || moveState.phase !== 'pick-target') {
     return moveState
   }
 
-  if (!moveState.originalPanel || !moveState.basePoint) {
+  if (!moveState.originalTarget || !moveState.basePoint) {
     return moveState
   }
 
-  const resolvedTarget = resolveMoveTargetPoint(localPoint, panels, moveState.panelId)
-  const targetPoint = getAxisLockedPoint(moveState.basePoint, resolvedTarget.point, lockAxis)
+  const resolvedTarget = resolveMoveTargetPoint(
+    moveState,
+    panels,
+    boxes,
+    localPoint,
+    viewport,
+    currentView
+  )
 
-  const dx = Number(targetPoint.x) - Number(moveState.basePoint.x)
-  const dy = Number(targetPoint.y) - Number(moveState.basePoint.y)
+  const targetPoint = getAxisLockedPoint(
+    moveState.basePoint,
+    resolvedTarget.point,
+    lockAxis
+  )
 
-  const previewPanel = movePanelByDelta(moveState.originalPanel, dx, dy, false)
+  const dx = toNumber(targetPoint.x) - toNumber(moveState.basePoint.x)
+  const dy = toNumber(targetPoint.y) - toNumber(moveState.basePoint.y)
+
+  const previewTarget = moveTargetByViewDelta(
+    moveState.targetType,
+    moveState.originalTarget,
+    dx,
+    dy,
+    currentView
+  )
 
   return {
     ...moveState,
+    cursorLocal: localPoint ? { ...localPoint } : null,
     targetPoint,
-    previewPanel,
-    snapPreview: resolvedTarget.snapPreview,
+    previewTarget,
+    targetSnap: resolvedTarget.snap,
     lockAxis: lockAxis ? (Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y') : null
   }
 } // End previewMoveToTarget
 
 //=================
-export function commitMoveToTarget(moveState, panels, localPoint, lockAxis = false) {
+export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoint, viewport, lockAxis = false, currentView = 'front') {
   if (!moveState.active || moveState.phase !== 'pick-target') {
     return {
       moveState,
       panels,
-      movedPanel: null
+      boxes,
+      movedTarget: null
     }
   }
 
-  const nextMoveState = previewMoveToTarget(moveState, panels, localPoint, lockAxis)
+  const nextMoveState = previewMoveToTarget(
+    moveState,
+    panels,
+    boxes,
+    localPoint,
+    viewport,
+    lockAxis,
+    currentView
+  )
 
-  if (!nextMoveState.previewPanel) {
+  if (!nextMoveState.previewTarget) {
     return {
       moveState: resetMoveState(),
       panels,
-      movedPanel: null
+      boxes,
+      movedTarget: null
     }
   }
 
   const nextPanels = panels.map((panel) => {
-    if (panel.id !== nextMoveState.panelId) return panel
-    return nextMoveState.previewPanel
+    if (nextMoveState.targetType !== 'panel') return panel
+    if (panel.id !== nextMoveState.targetId) return panel
+
+    return nextMoveState.previewTarget
+  })
+
+  const nextBoxes = boxes.map((box) => {
+    if (nextMoveState.targetType !== 'box') return box
+    if (box.id !== nextMoveState.targetId) return box
+
+    return nextMoveState.previewTarget
   })
 
   return {
     moveState: resetMoveState(),
     panels: nextPanels,
-    movedPanel: nextMoveState.previewPanel
+    boxes: nextBoxes,
+    movedTarget: {
+      type: nextMoveState.targetType,
+      id: nextMoveState.targetId,
+      target: nextMoveState.previewTarget
+    }
   }
 } // End commitMoveToTarget
 

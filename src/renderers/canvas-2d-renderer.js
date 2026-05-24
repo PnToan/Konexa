@@ -355,24 +355,41 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelId, currentView = '
 
 
 //=================
-function drawMovePreviewPanel(ctx, viewport, movePreviewPanel, currentView = 'front') {
-  if (!movePreviewPanel) return
+function drawMovePreviewTarget(ctx, viewport, movePreviewTarget, currentView = 'front') {
+  if (!movePreviewTarget?.target) return
 
-  const rect = getPanelRect(movePreviewPanel, currentView)
-
-  if (!rect) return
+  const targetType = movePreviewTarget.type
+  const target = movePreviewTarget.target
 
   ctx.save()
   ctx.setLineDash([8, 5])
 
-  drawRectLocal(ctx, viewport, rect, {
-    fill: 'rgba(255, 159, 26, 0.28)',
-    stroke: '#ff9f1a',
-    lineWidth: 2
-  })
+  if (targetType === 'panel') {
+    const rect = getPanelRect(target, currentView)
+
+    if (rect) {
+      drawRectLocal(ctx, viewport, rect, {
+        fill: 'rgba(37, 99, 235, 0.22)',
+        stroke: '#2563eb',
+        lineWidth: 2
+      })
+    }
+  }
+
+  if (targetType === 'box') {
+    const rect = projectBoxToCameraRect(target, currentView)
+
+    if (rect) {
+      drawRectLocal(ctx, viewport, rect, {
+        fill: 'rgba(37, 99, 235, 0.18)',
+        stroke: '#2563eb',
+        lineWidth: 2
+      })
+    }
+  }
 
   ctx.restore()
-} // End drawMovePreviewPanel
+} // End drawMovePreviewTarget
 
 //=================
 function drawMoveHoverSnapPoints(ctx, viewport, moveHoverSnapPoints = []) {
@@ -507,6 +524,76 @@ function drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer) {
 
   ctx.restore()
 } // End drawPanelInputBuffer
+//=================
+function drawMoveCursorIcon(ctx, viewport, moveCursorLocal) {
+  if (!moveCursorLocal) return
+
+  const point = localToScreen(viewport, moveCursorLocal.x, moveCursorLocal.y)
+  const x = point.x + 12
+  const y = point.y + 16
+  const size = 13
+  const half = size / 2
+
+  ctx.save()
+
+  ctx.strokeStyle = '#111827'
+  ctx.fillStyle = '#ffffff'
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  ctx.beginPath()
+  ctx.arc(x, y, 10, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.moveTo(x - half, y)
+  ctx.lineTo(x + half, y)
+  ctx.moveTo(x, y - half)
+  ctx.lineTo(x, y + half)
+  ctx.moveTo(x + half, y)
+  ctx.lineTo(x + half - 4, y - 4)
+  ctx.moveTo(x + half, y)
+  ctx.lineTo(x + half - 4, y + 4)
+  ctx.moveTo(x - half, y)
+  ctx.lineTo(x - half + 4, y - 4)
+  ctx.moveTo(x - half, y)
+  ctx.lineTo(x - half + 4, y + 4)
+  ctx.moveTo(x, y - half)
+  ctx.lineTo(x - 4, y - half + 4)
+  ctx.moveTo(x, y - half)
+  ctx.lineTo(x + 4, y - half + 4)
+  ctx.moveTo(x, y + half)
+  ctx.lineTo(x - 4, y + half - 4)
+  ctx.moveTo(x, y + half)
+  ctx.lineTo(x + 4, y + half - 4)
+  ctx.stroke()
+
+  ctx.restore()
+} // End drawMoveCursorIcon
+
+//=================
+function drawMoveTargetSnap(ctx, viewport, moveTargetSnap) {
+  if (!moveTargetSnap) return
+
+  const point = localToScreen(viewport, moveTargetSnap.x, moveTargetSnap.y)
+  const size = moveTargetSnap.type === 'edge' ? 10 : 9
+  const half = size / 2
+
+  ctx.save()
+
+  ctx.fillStyle = '#ffffff'
+  ctx.strokeStyle = '#22c55e'
+  ctx.lineWidth = 2
+
+  ctx.beginPath()
+  ctx.rect(point.x - half, point.y - half, size, size)
+  ctx.fill()
+  ctx.stroke()
+
+  ctx.restore()
+} // End drawMoveTargetSnap
 //=================
 function drawSnapPreview(ctx, viewport, snapPreview) {
   if (!snapPreview) return
@@ -725,8 +812,10 @@ export function renderCanvas2D(ctx, payload) {
     wallEditingDim,
     zones,
     panels,
-    movePreviewPanel,
+    movePreviewTarget,
     moveHoverSnapPoints,
+    moveTargetSnap,
+    moveCursorLocal,
     panelPreviewItems,
     panelInputBuffer,
     boxes,
@@ -755,10 +844,12 @@ export function renderCanvas2D(ctx, payload) {
   drawBoxDraft(ctx, viewport, boxDraftRect, currentView)
   drawZoneOverlay(ctx, viewport, zones, hover)
   drawPanels(ctx, viewport, panels, selectedPanelId, currentView)
-  drawMovePreviewPanel(ctx, viewport, movePreviewPanel, currentView)
+  drawMovePreviewTarget(ctx, viewport, movePreviewTarget, currentView)
   drawMoveHoverSnapPoints(ctx, viewport, moveHoverSnapPoints)
+  drawMoveTargetSnap(ctx, viewport, moveTargetSnap)
   drawPanelPreviewItems(ctx, viewport, panelPreviewItems, hover, currentView)
   drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer)
   drawSnapPreview(ctx, viewport, snapPreview)
+  drawMoveCursorIcon(ctx, viewport, moveCursorLocal)
   drawRulers(ctx, viewport, width, height)
 } // End renderCanvas2D

@@ -137,6 +137,22 @@ const store = createSimpleStore({
   }, // End setBoxSize
 
   //=================
+  setBoxes(boxes) {
+    if (!Array.isArray(boxes)) return
+
+    state.boxes = boxes
+  }, // End setBoxes
+  //=================
+  replaceBox(nextBox) {
+    if (!nextBox?.id) return
+
+    const index = state.boxes.findIndex((box) => box.id === nextBox.id)
+
+    if (index < 0) return
+
+    state.boxes.splice(index, 1, nextBox)
+  }, // End replaceBox
+  //=================
   getSelectedBox() {
     return state.boxes.find((item) => item.id === state.selectedBoxId) || null
   } // End getSelectedBox

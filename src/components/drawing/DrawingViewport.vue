@@ -119,14 +119,14 @@ const boxHeightInputStyle = computed(() => ({
   left: `${boxHeightInput.value.x}px`,
   top: `${boxHeightInput.value.y}px`
 }))
+//=================
 const canvasCursorClass = computed(() => {
   if (hoverDim.value) return 'mn-cursor-pointer'
-  if (app.state.currentTool === 'move') return 'mn-cursor-move'
   if (app.state.currentTool === 'box') return 'mn-cursor-box'
   if (app.state.currentTool === 'panel') return 'mn-cursor-crosshair'
   if (app.state.currentTool === 'select') return 'mn-cursor-select'
   return 'mn-cursor-default'
-})
+}) // End canvasCursorClass
 function resizeCanvas() {
   const canvas = canvasRef.value
   const host = viewportRef.value
@@ -160,8 +160,12 @@ function draw() {
     wallEditingDim: wall.state.editingDim,
     zones: drawing.state.zones,
     panels: drawing.state.panels,
-    movePreviewPanel: drawing.getMovePreviewPanel(),
+    movePreviewTarget: drawing.getMovePreviewTarget(),
     moveHoverSnapPoints: drawing.getMoveHoverSnapPoints(),
+    moveTargetSnap: drawing.getMoveTargetSnap(),
+    moveCursorLocal: app.state.currentTool === 'move'
+      ? drawing.getMoveCursorLocal()
+      : null,
     panelPreviewItems: drawing.getPanelPreviewItems(),
     panelInputBuffer: drawing.state.panelInputBuffer,
     boxes: box.state.boxes,
@@ -860,12 +864,21 @@ function onPointerDown(event) {
     }
 
     if (drawing.isCadMovePickingTarget()) {
-      drawing.commitCadMove(rawLocal, event.shiftKey)
+      drawing.commitCadMove(
+        rawLocal,
+        app.state.viewport,
+        event.shiftKey,
+        app.state.currentView
+      )
       draw()
       return
     }
 
-    drawing.startCadMoveFromHover(rawLocal, app.state.viewport)
+    drawing.startCadMoveFromHover(
+      rawLocal,
+      app.state.viewport,
+      app.state.currentView
+    )
     draw()
     return
   }
@@ -958,12 +971,22 @@ function onPointerMove(event) {
 
   if (app.state.currentTool === 'move') {
     if (drawing.isCadMovePickingTarget()) {
-      drawing.previewCadMove(rawLocal, event.shiftKey)
+      drawing.previewCadMove(
+        rawLocal,
+        app.state.viewport,
+        event.shiftKey,
+        app.state.currentView
+      )
     } else {
-      drawing.updateMoveToolHover(rawLocal, app.state.viewport)
+      drawing.updateMoveToolHover(
+        rawLocal,
+        app.state.viewport,
+        app.state.currentView
+      )
     }
 
     drawing.setHover(null)
+    hoverDim.value = null
     draw()
     return
   }
@@ -1093,7 +1116,7 @@ function onKeyDown(event) {
     event.preventDefault()
     app.setTool('move')
     drawing.resetMoveTool()
-    app.setStatus('Move: chọn điểm gốc trên tấm')
+    app.setStatus('Move: chọn điểm snap của tấm hoặc Box')
     draw()
     return
   }
@@ -1121,8 +1144,9 @@ watch(() => [box.state.boxes.length, box.state.selectedBoxId, box.state.editingD
 })
 watch(() => app.state.currentTool, (tool) => {
   if (tool === 'move') {
+    hoverDim.value = null
     drawing.resetMoveTool()
-    app.setStatus('Move: chọn điểm gốc trên tấm')
+    app.setStatus('Move: chọn điểm snap của tấm hoặc Box')
     draw()
     return
   }
@@ -1163,7 +1187,7 @@ onBeforeUnmount(() => {
 </script>
 <style scoped>
 .mn-cursor-move {
-  cursor: grab;
+  cursor: move !important;
 }
 
 .mn-cursor-box {
