@@ -106,6 +106,12 @@ function getWallBox3D() {
 const activeViewConfig = computed(() => app.getViewConfig(app.state.currentView))
 const axisHorizontal = computed(() => activeViewConfig.value.axisA || 'X')
 const axisVertical = computed(() => activeViewConfig.value.axisB || 'Y')
+
+const dimInputStyle = computed(() => ({
+  left: `${dimInput.value.x}px`,
+  top: `${dimInput.value.y}px`
+}))
+
 const boxHeightInputStyle = computed(() => ({
   left: `${boxHeightInput.value.x}px`,
   top: `${boxHeightInput.value.y}px`
@@ -518,17 +524,18 @@ function cancelDimInput() {
 } // End cancelDimInput
 //=================
 function openBoxHeightInput(event) {
+  const rect = canvasRef.value.getBoundingClientRect()
+
   boxHeightInput.value.active = true
-  boxHeightInput.value.x = event.clientX + 12
-  boxHeightInput.value.y = event.clientY + 12
+  boxHeightInput.value.x = event.clientX - rect.left + 12
+  boxHeightInput.value.y = event.clientY - rect.top + 12
   boxHeightInput.value.value = String(wall.state.height || 600)
 
   nextTick(() => {
     boxHeightInputRef.value?.focus()
     boxHeightInputRef.value?.select()
   })
-}
-// End openBoxHeightInput
+} // End openBoxHeightInput
 //=================
 function cancelBoxHeightInput() {
   boxHeightInput.value.active = false
@@ -608,6 +615,39 @@ function onPointerDown(event) {
 
   const rawLocal = localFromEvent(event)
   const local = getBoxSnapLocal(rawLocal)
+
+  if (app.state.currentTool === 'box') {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (event.button !== 0) {
+      return
+    }
+
+    if (app.state.currentView !== 'top') {
+      app.setStatus('Box chỉ tạo ở mặt Trên')
+      draw()
+      return
+    }
+
+    if (boxHeightInput.value.active) {
+      return
+    }
+
+    if (!box.state.draft.active) {
+      box.startDraft(local)
+      app.setStatus('Box: chọn điểm góc thứ hai')
+      draw()
+      return
+    }
+
+    box.updateDraft(local)
+    openBoxHeightInput(event)
+    app.setStatus('Nhập chiều cao Box rồi nhấn Enter')
+    draw()
+    return
+  }
+
   const canvasRect = canvasRef.value.getBoundingClientRect()
   const screenX = event.clientX - canvasRect.left
   const screenY = event.clientY - canvasRect.top
@@ -640,31 +680,6 @@ function onPointerDown(event) {
     panning = true
     panStart = { x: event.clientX, y: event.clientY }
     panOriginal = { x: app.state.viewport.panX, y: app.state.viewport.panY }
-    return
-  }
-
-  if (app.state.currentTool === 'box') {
-    if (app.state.currentView !== 'top') {
-      app.setStatus('Box chỉ tạo ở mặt Trên')
-      draw()
-      return
-    }
-
-    if (boxHeightInput.value.active) {
-      return
-    }
-
-    if (!box.state.draft.active) {
-      box.startDraft(local)
-      app.setStatus('Box: chọn điểm góc thứ hai')
-      draw()
-      return
-    }
-
-    box.updateDraft(local)
-    openBoxHeightInput(event)
-    app.setStatus('Nhập chiều cao Box rồi nhấn Enter')
-    draw()
     return
   }
 
