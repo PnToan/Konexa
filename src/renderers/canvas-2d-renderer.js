@@ -353,6 +353,49 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelId, currentView = '
   })
 } // End drawPanels
 
+
+//=================
+function drawMovePreviewPanel(ctx, viewport, movePreviewPanel, currentView = 'front') {
+  if (!movePreviewPanel) return
+
+  const rect = getPanelRect(movePreviewPanel, currentView)
+
+  if (!rect) return
+
+  ctx.save()
+  ctx.setLineDash([8, 5])
+
+  drawRectLocal(ctx, viewport, rect, {
+    fill: 'rgba(255, 159, 26, 0.28)',
+    stroke: '#ff9f1a',
+    lineWidth: 2
+  })
+
+  ctx.restore()
+} // End drawMovePreviewPanel
+
+//=================
+function drawMoveHoverSnapPoints(ctx, viewport, moveHoverSnapPoints = []) {
+  if (!Array.isArray(moveHoverSnapPoints) || moveHoverSnapPoints.length === 0) return
+
+  ctx.save()
+
+  moveHoverSnapPoints.forEach((snapPoint) => {
+    const point = localToScreen(viewport, snapPoint.x, snapPoint.y)
+
+    ctx.fillStyle = '#ffffff'
+    ctx.strokeStyle = '#ff9f1a'
+    ctx.lineWidth = 2
+
+    ctx.beginPath()
+    ctx.arc(point.x, point.y, 6, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+  })
+
+  ctx.restore()
+} // End drawMoveHoverSnapPoints
+
 //=================
 function drawPanelPreviewItems(ctx, viewport, previewItems = [], hover, currentView = 'front') {
   if (!Array.isArray(previewItems) || previewItems.length === 0) return
@@ -682,6 +725,8 @@ export function renderCanvas2D(ctx, payload) {
     wallEditingDim,
     zones,
     panels,
+    movePreviewPanel,
+    moveHoverSnapPoints,
     panelPreviewItems,
     panelInputBuffer,
     boxes,
@@ -710,6 +755,8 @@ export function renderCanvas2D(ctx, payload) {
   drawBoxDraft(ctx, viewport, boxDraftRect, currentView)
   drawZoneOverlay(ctx, viewport, zones, hover)
   drawPanels(ctx, viewport, panels, selectedPanelId, currentView)
+  drawMovePreviewPanel(ctx, viewport, movePreviewPanel, currentView)
+  drawMoveHoverSnapPoints(ctx, viewport, moveHoverSnapPoints)
   drawPanelPreviewItems(ctx, viewport, panelPreviewItems, hover, currentView)
   drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer)
   drawSnapPreview(ctx, viewport, snapPreview)

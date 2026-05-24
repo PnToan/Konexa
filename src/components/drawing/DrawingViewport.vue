@@ -59,7 +59,7 @@ import { useBoxStore } from '../../stores/useBoxStore'
 import { renderCanvas2D, getWallDimHit, getBoxDimHit } from '../../renderers/canvas-2d-renderer'
 import { screenToLocal, localToScreen } from '../../renderers/viewport-transform'
 import { projectBoxToCameraRect, cameraLocalToWorldPoint } from '../../core/view/view-camera'
-import { createMoveSnapResult, getPanelSnapPoints, hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
+import { hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
 import { handleViewportKey } from '../../commands/keyboard-controller'
 
 const app = useAppStore()
@@ -160,6 +160,8 @@ function draw() {
     wallEditingDim: wall.state.editingDim,
     zones: drawing.state.zones,
     panels: drawing.state.panels,
+    movePreviewPanel: drawing.getMovePreviewPanel(),
+    moveHoverSnapPoints: drawing.getMoveHoverSnapPoints(),
     panelPreviewItems: drawing.getPanelPreviewItems(),
     panelInputBuffer: drawing.state.panelInputBuffer,
     boxes: box.state.boxes,
@@ -451,29 +453,6 @@ function zoomAtPoint(screenX, screenY, nextZoom) {
 
   app.setPan(nextPanX, nextPanY)
 } // End zoomAtPoint
-function hitTestMoveGrip(local) {
-  const tolerance = 14 / (app.state.viewport.localScale * app.state.viewport.zoom)
-  const hoverPanel = drawing.state.hover?.type === 'panel' ? drawing.state.hover.panel : null
-
-  if (!hoverPanel) return null
-
-  const gripPoints = getPanelSnapPoints(hoverPanel).filter((snapPoint) => snapPoint.type === 'corner')
-
-  for (const gripPoint of gripPoints) {
-    const dx = local.x - gripPoint.x
-    const dy = local.y - gripPoint.y
-    const distance = Math.sqrt(dx * dx + dy * dy)
-
-    if (distance <= tolerance) {
-      return {
-        panel: hoverPanel,
-        gripPoint
-      }
-    }
-  }
-
-  return null
-} // End hitTestMoveGrip
 //=================
 function updateHover(local) {
   const scale = app.state.viewport.localScale * app.state.viewport.zoom
@@ -858,17 +837,36 @@ function onPointerDown(event) {
 
   const activeDimHit = boxDimHit || wallDimHit || hoverDim.value
 
-  if (activeDimHit) {
+  if (app.state.currentTool !== 'move' && activeDimHit) {
     event.preventDefault()
     event.stopPropagation()
     openDimInput(activeDimHit)
     return
   }
 
-  if (event.button === 1 || event.button === 2 || event.shiftKey) {
+  if (event.button === 1 || event.button === 2 || (event.shiftKey && app.state.currentTool !== 'move')) {
     panning = true
     panStart = { x: event.clientX, y: event.clientY }
     panOriginal = { x: app.state.viewport.panX, y: app.state.viewport.panY }
+    return
+  }
+
+  if (app.state.currentTool === 'move') {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (event.button !== 0) {
+      return
+    }
+
+    if (drawing.isCadMovePickingTarget()) {
+      drawing.commitCadMove(rawLocal, event.shiftKey)
+      draw()
+      return
+    }
+
+    drawing.startCadMoveFromHover(rawLocal, app.state.viewport)
+    draw()
     return
   }
 
@@ -891,23 +889,10 @@ function onPointerDown(event) {
     return
   }
 
-  const gripHit = app.state.currentTool === 'move' ? hitTestMoveGrip(local) : null
-  const panelHit = hitTestPanel(drawing.state.panels, local)
+  const panelHit = hitTestPanel(drawing.state.panels, rawLocal)
 
-  if (app.state.currentTool === 'move' && gripHit) {
-    drawing.selectPanel(gripHit.panel.id)
-    drawing.startMove(gripHit.panel.id, gripHit.gripPoint)
-    draw()
-    return
-  }
-
-  if ((app.state.currentTool === 'select' || app.state.currentTool === 'move') && panelHit) {
+  if (app.state.currentTool === 'select' && panelHit) {
     drawing.selectPanel(panelHit.panel.id)
-
-    if (app.state.currentTool === 'move') {
-      drawing.startMove(panelHit.panel.id, local)
-    }
-
     draw()
     return
   }
@@ -950,7 +935,6 @@ function onPointerMove(event) {
     return
   }
 
-  const local = rawLocal
   const canvasRect = canvasRef.value.getBoundingClientRect()
   const screenX = event.clientX - canvasRect.left
   const screenY = event.clientY - canvasRect.top
@@ -970,19 +954,16 @@ function onPointerMove(event) {
     app.state.currentView
   )
 
-  hoverDim.value = boxDimHit || wallDimHit
+  hoverDim.value = app.state.currentTool === 'move' ? null : boxDimHit || wallDimHit
 
-  if (drawing.state.drag.active) {
-    const snapResult = createMoveSnapResult(
-      local,
-      drawing.state.panels,
-      drawing.state.drag.panelId
-    )
+  if (app.state.currentTool === 'move') {
+    if (drawing.isCadMovePickingTarget()) {
+      drawing.previewCadMove(rawLocal, event.shiftKey)
+    } else {
+      drawing.updateMoveToolHover(rawLocal, app.state.viewport)
+    }
 
-    const movePoint = snapResult.active ? snapResult.point : local
-
-    drawing.setSnapPreview(snapResult.active ? snapResult.snap : null)
-    drawing.updateMove(movePoint, event.shiftKey)
+    drawing.setHover(null)
     draw()
     return
   }
@@ -993,15 +974,14 @@ function onPointerMove(event) {
 } // End onPointerMove
 //=================
 function onPointerUp() {
-  if (drawing.state.drag.active) {
-    drawing.endMove()
-    drawing.clearSnapPreview()
-  }
-
   panning = false
   panStart = null
   panOriginal = null
-  drawing.clearSnapPreview()
+
+  if (app.state.currentTool !== 'move') {
+    drawing.clearSnapPreview()
+  }
+
   draw()
 } // End onPointerUp
 //=================
@@ -1098,12 +1078,22 @@ function onKeyDown(event) {
 
   if (key === 'Escape') {
     event.preventDefault()
+
+    if (app.state.currentTool === 'move') {
+      drawing.cancelCadMove()
+      draw()
+      return
+    }
+
     exitToSelect()
     return
   }
 
   if (key === 'm' || key === 'M') {
+    event.preventDefault()
     app.setTool('move')
+    drawing.resetMoveTool()
+    app.setStatus('Move: chọn điểm gốc trên tấm')
     draw()
     return
   }
@@ -1130,6 +1120,15 @@ watch(() => [box.state.boxes.length, box.state.selectedBoxId, box.state.editingD
   draw()
 })
 watch(() => app.state.currentTool, (tool) => {
+  if (tool === 'move') {
+    drawing.resetMoveTool()
+    app.setStatus('Move: chọn điểm gốc trên tấm')
+    draw()
+    return
+  }
+
+  drawing.resetMoveTool()
+
   if (tool !== 'select') {
     return
   }
@@ -1164,7 +1163,7 @@ onBeforeUnmount(() => {
 </script>
 <style scoped>
 .mn-cursor-move {
-  cursor: move;
+  cursor: grab;
 }
 
 .mn-cursor-box {

@@ -7,10 +7,17 @@ import {
   createPanelOnZoneEdge,
   createPanelPreview,
   createSplitPreview,
-  splitZoneByCount,
-  movePanelByDelta
+  splitZoneByCount
 } from '../core/panel/panel-engine'
 import { projectBoxToCameraRect } from '../core/view/view-camera'
+import {
+  cancelMove,
+  commitMoveToTarget,
+  createMoveState,
+  previewMoveToTarget,
+  startMoveFromBasePoint,
+  updateMoveHover
+} from '../core/tools/moveTool'
 
 const store = createSimpleStore({
   panels: [],
@@ -19,12 +26,7 @@ const store = createSimpleStore({
   snapPreview: null,
   selectedPanelId: null,
   panelInputBuffer: '',
-  drag: {
-    active: false,
-    panelId: null,
-    startLocal: null,
-    originalPanel: null
-  }
+  move: createMoveState()
 }, (state) => ({
   //=================
   isPanelToolAllowed() {
@@ -519,59 +521,119 @@ const store = createSimpleStore({
   }, // End deleteSelected
 
   //=================
-  startMove(panelId, localPoint) {
-    const panel = state.panels.find((item) => item.id === panelId)
-
-    if (!panel) return
-
-    state.drag.active = true
-    state.drag.panelId = panelId
-    state.drag.startLocal = { ...localPoint }
-    state.drag.originalPanel = { ...panel }
-    state.selectedPanelId = panelId
-  }, // End startMove
+  resetMoveTool() {
+    state.move = createMoveState()
+    state.snapPreview = null
+  }, // End resetMoveTool
 
   //=================
-  updateMove(localPoint, lockAxis = false) {
-    if (!state.drag.active || !state.drag.originalPanel || !state.drag.startLocal) return
+  updateMoveToolHover(localPoint, viewport) {
+    state.move = updateMoveHover(
+      state.move,
+      state.panels,
+      localPoint,
+      viewport
+    )
 
-    const dx = localPoint.x - state.drag.startLocal.x
-    const dy = localPoint.y - state.drag.startLocal.y
-    const moved = movePanelByDelta(state.drag.originalPanel, dx, dy, lockAxis)
-    const index = state.panels.findIndex((panel) => panel.id === state.drag.panelId)
-
-    if (index >= 0) state.panels[index] = moved
-
-    this.rebuildZones()
-  }, // End updateMove
+    state.snapPreview = null
+  }, // End updateMoveToolHover
 
   //=================
-  endMove() {
-    state.drag.active = false
-    state.drag.panelId = null
-    state.drag.startLocal = null
-    state.drag.originalPanel = null
-  }, // End endMove
+  startCadMoveFromHover(localPoint, viewport) {
+    const hoverState = updateMoveHover(
+      state.move,
+      state.panels,
+      localPoint,
+      viewport
+    )
+
+    if (!hoverState.hoverPanelId || !hoverState.hoverBasePoint) {
+      state.move = hoverState
+      return null
+    }
+
+    const panel = state.panels.find((item) => item.id === hoverState.hoverPanelId)
+
+    if (!panel) {
+      state.move = hoverState
+      return null
+    }
+
+    state.move = startMoveFromBasePoint(
+      hoverState,
+      panel,
+      hoverState.hoverBasePoint
+    )
+
+    state.selectedPanelId = panel.id
+    state.snapPreview = null
+    useAppStore().setStatus('Move: đã chọn điểm gốc')
+
+    return panel
+  }, // End startCadMoveFromHover
 
   //=================
-  moveSelectedByNumber(distance) {
-    const id = state.selectedPanelId
+  previewCadMove(localPoint, lockAxis = false) {
+    state.move = previewMoveToTarget(
+      state.move,
+      state.panels,
+      localPoint,
+      lockAxis
+    )
 
-    if (!id) return
+    state.snapPreview = state.move.snapPreview || null
 
-    const index = state.panels.findIndex((panel) => panel.id === id)
+    return state.move.previewPanel || null
+  }, // End previewCadMove
 
-    if (index < 0) return
+  //=================
+  commitCadMove(localPoint, lockAxis = false) {
+    const result = commitMoveToTarget(
+      state.move,
+      state.panels,
+      localPoint,
+      lockAxis
+    )
 
-    const panel = state.panels[index]
-    const dx = panel.orientation === 'vertical' ? distance : 0
-    const dy = panel.orientation === 'horizontal' ? distance : 0
+    state.move = result.moveState
+    state.panels = result.panels
+    state.snapPreview = null
 
-    state.panels[index] = movePanelByDelta(panel, dx, dy, false)
+    if (result.movedPanel) {
+      state.selectedPanelId = result.movedPanel.id
+      this.rebuildZones()
+      useAppStore().setStatus('Đã di chuyển tấm')
+    }
 
-    this.rebuildZones()
-    useAppStore().setStatus(`Đã di chuyển ${distance}mm`)
-  } // End moveSelectedByNumber
+    return result.movedPanel
+  }, // End commitCadMove
+
+  //=================
+  cancelCadMove() {
+    state.move = cancelMove()
+    state.snapPreview = null
+    useAppStore().setStatus('Đã hủy Move')
+  }, // End cancelCadMove
+
+  //=================
+  getMovePreviewPanel() {
+    if (!state.move.active) return null
+    if (state.move.phase !== 'pick-target') return null
+
+    return state.move.previewPanel || null
+  }, // End getMovePreviewPanel
+
+  //=================
+  getMoveHoverSnapPoints() {
+    if (!state.move) return []
+
+    return state.move.hoverSnapPoints || []
+  }, // End getMoveHoverSnapPoints
+
+  //=================
+  isCadMovePickingTarget() {
+    return state.move?.active === true && state.move?.phase === 'pick-target'
+  } // End isCadMovePickingTarget
 }))
 
 //=================
