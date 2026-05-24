@@ -438,6 +438,19 @@ function localFromEvent(event) {
 
   return cameraLocal
 } // End localFromEvent
+//=================
+function zoomAtPoint(screenX, screenY, nextZoom) {
+  const viewport = app.state.viewport
+  const beforeLocal = screenToLocal(viewport, screenX, screenY)
+
+  app.setZoom(nextZoom)
+
+  const scale = viewport.localScale * viewport.zoom
+  const nextPanX = screenX - viewport.localOriginX - beforeLocal.x * scale
+  const nextPanY = screenY - viewport.localOriginY + beforeLocal.y * scale
+
+  app.setPan(nextPanX, nextPanY)
+} // End zoomAtPoint
 function hitTestMoveGrip(local) {
   const tolerance = 14 / (app.state.viewport.localScale * app.state.viewport.zoom)
   const hoverPanel = drawing.state.hover?.type === 'panel' ? drawing.state.hover.panel : null
@@ -991,12 +1004,31 @@ function onPointerUp() {
   drawing.clearSnapPreview()
   draw()
 } // End onPointerUp
+//=================
 function onWheel(event) {
+  const rect = canvasRef.value.getBoundingClientRect()
+  const screenX = event.clientX - rect.left
+  const screenY = event.clientY - rect.top
   const direction = event.deltaY < 0 ? 1 : -1
   const next = app.state.viewport.zoom * (direction > 0 ? 1.12 : 0.88)
-  app.setZoom(next)
+
+  zoomAtPoint(screenX, screenY, next)
+
+  const cameraLocal = screenToLocal(app.state.viewport, screenX, screenY)
+  const worldPoint = cameraLocalToWorldPoint(cameraLocal, app.state.currentView)
+
+  app.setMouse({
+    x: screenX,
+    y: screenY,
+    localX: cameraLocal.x,
+    localY: cameraLocal.y,
+    worldX: worldPoint.x,
+    worldY: worldPoint.y,
+    worldZ: worldPoint.z
+  })
+
   draw()
-}
+} // End onWheel
 //=================
 function onKeyDown(event) {
   const key = event.key
