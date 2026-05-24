@@ -733,25 +733,31 @@ function onBoxHeightInputKeyDown(event) {
 } // End onBoxHeightInputKeyDown
 //=================
 function commitDimInput() {
-  const numberValue = Number(dimInput.value.value)
+  const rawValue = String(dimInput.value.value || '').replace(',', '.')
+  const numberValue = Number(rawValue)
 
   if (!Number.isFinite(numberValue) || numberValue <= 0) {
     cancelDimInput()
     return
   }
 
-  if (dimInput.value.target === 'box') {
-    box.setBoxSize(dimInput.value.boxId, dimInput.value.key, numberValue, getWallBox3D())
+  if (dimInput.value.target === 'wall') {
+    wall.setWallSize(dimInput.value.key, numberValue)
     drawing.rebuildZones()
-    app.setStatus(`Đã cập nhật Box ${dimInput.value.key}: ${numberValue}mm`)
-  } else {
-    wall.setSize(dimInput.value.key, numberValue)
-    app.setStatus(`Đã cập nhật Wall ${dimInput.value.key}: ${numberValue}mm`)
   }
 
-  dimInput.value.active = false
-  wall.clearEditingDim()
-  box.clearEditingDim()
+  if (dimInput.value.target === 'box') {
+    box.setBoxSize(
+      dimInput.value.boxId,
+      dimInput.value.key,
+      numberValue,
+      getWallBox3D()
+    )
+
+    drawing.rebuildZones()
+  }
+
+  cancelDimInput()
   draw()
 } // End commitDimInput
 //=================

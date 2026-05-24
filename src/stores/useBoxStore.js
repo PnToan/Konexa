@@ -116,24 +116,24 @@ const store = createSimpleStore({
 setBoxSize(boxId, key, value, wallBox = null) {
   if (!['width', 'depth', 'height'].includes(key)) return
 
-  const box = state.boxes.find((item) => item.id === boxId)
-  if (!box) return
+  const item = state.boxes.find((box) => box.id === boxId)
+  if (!item) return
 
-  const nextValue = normalizePositiveNumber(value, box[key] || 1)
+  const rawValue = typeof value === 'string'
+    ? Number(value.replace(',', '.'))
+    : Number(value)
+
+  if (!Number.isFinite(rawValue) || rawValue <= 0) return
 
   if (key === 'depth') {
-    const backY = box.y + box.depth
-    const wallMinY = wallBox ? wallBox.y : -Infinity
+    const anchorY = item.y + item.depth
 
-    const maxDepth = backY - wallMinY
-    const nextDepth = Math.min(nextValue, Math.max(1, maxDepth))
-
-    box.y = backY - nextDepth
-    box.depth = nextDepth
+    item.y = anchorY - rawValue
+    item.depth = rawValue
     return
   }
 
-  box[key] = nextValue
+  item[key] = rawValue
 }, // End setBoxSize
 
   //=================
