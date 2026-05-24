@@ -40,7 +40,6 @@ const store = createSimpleStore({
     return Number(cabinet.state.panelThickness || 18)
   }, // End getPanelThickness
 
-  //=================
   rebuildZones() {
     const app = useAppStore()
     const box = useBoxStore()
@@ -55,7 +54,6 @@ const store = createSimpleStore({
 
     box.state.boxes.forEach((baseBox) => {
       const rect = projectBoxToCameraRect(baseBox, 'front')
-
       const baseRect = {
         ...rect,
         id: baseBox.id,
@@ -71,10 +69,10 @@ const store = createSimpleStore({
       }
 
       const panelsInBox = state.panels.filter((panel) => {
-        return panel.linkedFrameId === baseBox.id ||
-          panel.frameId === baseBox.id ||
-          panel.sourceBoxId === baseBox.id ||
-          panel.baseObjectId === baseBox.id
+        return panel.linkedFrameId === baseBox.id
+          || panel.frameId === baseBox.id
+          || panel.sourceBoxId === baseBox.id
+          || panel.baseObjectId === baseBox.id
       })
 
       const zones = buildZones(baseRect, panelsInBox).map((zone) => ({
@@ -93,7 +91,231 @@ const store = createSimpleStore({
 
     state.zones = allZones
   }, // End rebuildZones
+  //=================
+  updatePanelsAfterBoxResize(oldBox, newBox) {
+    if (!oldBox || !newBox || oldBox.id !== newBox.id) return
 
+    const oldWidth = Number(oldBox.width || 0)
+    const oldHeight = Number(oldBox.height || 0)
+    const newWidth = Number(newBox.width || 0)
+    const newHeight = Number(newBox.height || 0)
+
+    if (oldWidth <= 0 || oldHeight <= 0 || newWidth <= 0 || newHeight <= 0) return
+
+    const newX = Number(newBox.x || 0)
+    const newZ = Number(newBox.z || 0)
+
+    const panelsInBox = state.panels.filter((panel) => {
+      return panel.linkedFrameId === newBox.id
+        || panel.frameId === newBox.id
+        || panel.sourceBoxId === newBox.id
+        || panel.baseObjectId === newBox.id
+    })
+
+    const panelsOutsideBox = state.panels.filter((panel) => {
+      return !(panel.linkedFrameId === newBox.id
+        || panel.frameId === newBox.id
+        || panel.sourceBoxId === newBox.id
+        || panel.baseObjectId === newBox.id)
+    })
+
+    const nextPanelsInBox = []
+
+    const baseRect = {
+      x: newX,
+      y: newZ,
+      width: newWidth,
+      height: newHeight,
+      minX: newX,
+      maxX: newX + newWidth,
+      minY: newZ,
+      maxY: newZ + newHeight,
+      minZ: newZ,
+      maxZ: newZ + newHeight,
+      id: newBox.id,
+      name: newBox.name,
+      frameId: newBox.id,
+      linkedFrameId: newBox.id,
+      sourceBoxId: newBox.id,
+      baseObjectId: newBox.id,
+      depth: newBox.depth,
+      source: newBox,
+      sourceBox: newBox,
+      baseObject: newBox
+    }
+
+    const getPanelEdge = (panel) => {
+      if (panel.panelOffsetFrom === 'left' || panel.panelOffsetFrom === 'right' || panel.panelOffsetFrom === 'top' || panel.panelOffsetFrom === 'bottom') {
+        return panel.panelOffsetFrom
+      }
+
+      if (panel.edge === 'left' || panel.edge === 'right' || panel.edge === 'top' || panel.edge === 'bottom') {
+        return panel.edge
+      }
+
+      if (panel.panelSide === 'left' || panel.panelSide === 'right' || panel.panelSide === 'top' || panel.panelSide === 'bottom') {
+        return panel.panelSide
+      }
+
+      if (panel.panelSide === 'split_vertical') return 'left'
+      if (panel.panelSide === 'split_horizontal') return 'bottom'
+
+      if (panel.orientation === 'vertical') return 'left'
+      if (panel.orientation === 'horizontal') return 'bottom'
+
+      return null
+    }
+
+    const getPanelThicknessValue = (panel) => {
+      if (panel.orientation === 'vertical') {
+        return Number(panel.panelThickness ?? panel.thickness ?? panel.xSize ?? panel.width ?? 18)
+      }
+
+      if (panel.orientation === 'horizontal') {
+        return Number(panel.panelThickness ?? panel.thickness ?? panel.zSize ?? panel.height ?? 18)
+      }
+
+      return Number(panel.panelThickness ?? panel.thickness ?? 18)
+    }
+
+    const findZoneForOffsetPanel = (zones, edge, offset, oldPanel) => {
+      if (!zones.length) return null
+
+      const oldPanelX = Number(oldPanel.x3d ?? oldPanel.x ?? Number(oldBox.x || 0))
+      const oldPanelZ = Number(oldPanel.z3d ?? oldPanel.z ?? oldPanel.y ?? Number(oldBox.z || 0))
+      const oldPanelWidth = Number(oldPanel.xSize ?? oldPanel.width ?? 0)
+      const oldPanelHeight = Number(oldPanel.zSize ?? oldPanel.height ?? 0)
+
+      const oldCenterX = oldPanelX + (oldPanelWidth / 2)
+      const oldCenterZ = oldPanelZ + (oldPanelHeight / 2)
+
+      const ratioX = (oldCenterX - Number(oldBox.x || 0)) / oldWidth
+      const ratioZ = (oldCenterZ - Number(oldBox.z || 0)) / oldHeight
+
+      let targetX = newX + (ratioX * newWidth)
+      let targetY = newZ + (ratioZ * newHeight)
+
+      if (edge === 'left') {
+        targetX = newX + offset
+      } else if (edge === 'right') {
+        targetX = newX + newWidth - offset
+      } else if (edge === 'bottom') {
+        targetY = newZ + offset
+      } else if (edge === 'top') {
+        targetY = newZ + newHeight - offset
+      }
+
+      return zones.find((zone) => {
+        const minX = Number(zone.minX ?? zone.x ?? 0)
+        const maxX = Number(zone.maxX ?? (minX + Number(zone.width || 0)))
+        const minY = Number(zone.minY ?? zone.minZ ?? zone.y ?? 0)
+        const maxY = Number(zone.maxY ?? zone.maxZ ?? (minY + Number(zone.height || 0)))
+
+        return targetX >= minX - 0.001
+          && targetX <= maxX + 0.001
+          && targetY >= minY - 0.001
+          && targetY <= maxY + 0.001
+      }) || zones[0]
+    }
+
+    panelsInBox.forEach((oldPanel) => {
+      const edge = getPanelEdge(oldPanel)
+      if (!edge) return
+
+      const thickness = getPanelThicknessValue(oldPanel)
+      const isDividePanel = oldPanel.panelSide === 'split_vertical'
+        || oldPanel.panelSide === 'split_horizontal'
+        || Number(oldPanel.panelDivideCount || 0) >= 2
+
+      const currentZones = buildZones(baseRect, nextPanelsInBox).map((zone) => ({
+        ...zone,
+        frameId: newBox.id,
+        linkedFrameId: newBox.id,
+        sourceBoxId: newBox.id,
+        baseObjectId: newBox.id,
+        depth: newBox.depth,
+        sourceBox: newBox,
+        baseObject: newBox
+      }))
+
+      if (!currentZones.length) return
+
+      let targetZone = currentZones[0]
+      let offset = Number(oldPanel.panelOffset ?? 0)
+
+      if (!isDividePanel) {
+        targetZone = findZoneForOffsetPanel(currentZones, edge, offset, oldPanel)
+      } else {
+        const oldPanelX = Number(oldPanel.x3d ?? oldPanel.x ?? newX)
+        const oldPanelZ = Number(oldPanel.z3d ?? oldPanel.z ?? oldPanel.y ?? newZ)
+        const oldPanelWidth = Number(oldPanel.xSize ?? oldPanel.width ?? 0)
+        const oldPanelHeight = Number(oldPanel.zSize ?? oldPanel.height ?? 0)
+
+        const oldCenterX = oldPanelX + (oldPanelWidth / 2)
+        const oldCenterZ = oldPanelZ + (oldPanelHeight / 2)
+
+        const ratioX = (oldCenterX - Number(oldBox.x || 0)) / oldWidth
+        const ratioZ = (oldCenterZ - Number(oldBox.z || 0)) / oldHeight
+
+        const nextCenterX = newX + (ratioX * newWidth)
+        const nextCenterZ = newZ + (ratioZ * newHeight)
+
+        targetZone = currentZones.find((zone) => {
+          const minX = Number(zone.minX ?? zone.x ?? 0)
+          const maxX = Number(zone.maxX ?? (minX + Number(zone.width || 0)))
+          const minY = Number(zone.minY ?? zone.minZ ?? zone.y ?? 0)
+          const maxY = Number(zone.maxY ?? zone.maxZ ?? (minY + Number(zone.height || 0)))
+
+          return nextCenterX >= minX - 0.001
+            && nextCenterX <= maxX + 0.001
+            && nextCenterZ >= minY - 0.001
+            && nextCenterZ <= maxY + 0.001
+        }) || currentZones[0]
+
+        if (edge === 'left') {
+          offset = Math.max(0, nextCenterX - Number(targetZone.minX ?? targetZone.x ?? 0) - (thickness / 2))
+        } else if (edge === 'right') {
+          const zoneMaxX = Number(targetZone.maxX ?? ((targetZone.x || 0) + (targetZone.width || 0)))
+          offset = Math.max(0, zoneMaxX - nextCenterX - (thickness / 2))
+        } else if (edge === 'bottom') {
+          offset = Math.max(0, nextCenterZ - Number(targetZone.minY ?? targetZone.minZ ?? targetZone.y ?? 0) - (thickness / 2))
+        } else if (edge === 'top') {
+          const zoneMaxY = Number(targetZone.maxY ?? targetZone.maxZ ?? ((targetZone.y || 0) + (targetZone.height || 0)))
+          offset = Math.max(0, zoneMaxY - nextCenterZ - (thickness / 2))
+        }
+      }
+
+      const nextPanel = createPanelOnZoneEdge(targetZone, edge, thickness, offset)
+      if (!nextPanel) return
+
+      nextPanelsInBox.push({
+        ...oldPanel,
+        ...nextPanel,
+        id: oldPanel.id,
+        name: oldPanel.name,
+        zoneId: nextPanel.zoneId,
+        panelBaseZone: nextPanel.panelBaseZone,
+        linkedFrameId: newBox.id,
+        frameId: newBox.id,
+        sourceBoxId: newBox.id,
+        baseObjectId: newBox.id,
+        panelSide: oldPanel.panelSide || nextPanel.panelSide,
+        panelDivideCount: oldPanel.panelDivideCount,
+        panelOffsetFrom: oldPanel.panelOffsetFrom || nextPanel.panelOffsetFrom,
+        panelOffset: offset,
+        panelThickness: thickness,
+        thickness,
+        dimEnabled: oldPanel.dimEnabled ?? false
+      })
+    })
+
+    state.panels = [
+      ...panelsOutsideBox,
+      ...nextPanelsInBox
+    ]
+
+    this.rebuildZones()
+  }, // End updatePanelsAfterBoxResize
   //=================
   setHover(hit) {
     if (hit?.type === 'zone-edge' && !this.isPanelToolAllowed()) {

@@ -1,6 +1,6 @@
 import { createSimpleStore } from './createStore'
 import { normalizePositiveNumber } from '../core/geometry/number-utils'
-
+import { useDrawingStore } from './useDrawingStore'
 let boxIdSeed = 1
 
 //=================
@@ -112,29 +112,29 @@ const store = createSimpleStore({
     state.editingDim = null
   }, // End clearEditingDim
 
-//=================
-setBoxSize(boxId, key, value, wallBox = null) {
-  if (!['width', 'depth', 'height'].includes(key)) return
+  //=================
+  setBoxSize(boxId, key, value, wallBox = null) {
+    if (!['width', 'depth', 'height'].includes(key)) return
 
-  const item = state.boxes.find((box) => box.id === boxId)
-  if (!item) return
+    const item = state.boxes.find((box) => box.id === boxId)
+    if (!item) return
 
-  const rawValue = typeof value === 'string'
-    ? Number(value.replace(',', '.'))
-    : Number(value)
+    const rawValue = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value)
+    if (!Number.isFinite(rawValue) || rawValue <= 0) return
 
-  if (!Number.isFinite(rawValue) || rawValue <= 0) return
+    const oldBox = { ...item }
 
-  if (key === 'depth') {
-    const anchorY = item.y + item.depth
+    if (key === 'depth') {
+      const anchorY = item.y + item.depth
+      item.y = anchorY - rawValue
+      item.depth = rawValue
+    } else {
+      item[key] = rawValue
+    }
 
-    item.y = anchorY - rawValue
-    item.depth = rawValue
-    return
-  }
-
-  item[key] = rawValue
-}, // End setBoxSize
+    const drawing = useDrawingStore()
+    drawing.updatePanelsAfterBoxResize(oldBox, item)
+  }, // End setBoxSize
 
   //=================
   getSelectedBox() {
