@@ -287,7 +287,107 @@ function getWallSnapResult(local, wallRect, tolerance) {
     snap: bestEdge
   }
 } // End getWallSnapResult
+//=================
+function getExistingBoxSnapResult(local, tolerance = 18) {
+  if (!local || app.state.currentView !== 'top') {
+    return null
+  }
 
+  const boxes = box.state.boxes || []
+
+  if (!boxes.length) {
+    return null
+  }
+
+  const scale = app.state.viewport.localScale * app.state.viewport.zoom
+  const toleranceLocal = tolerance / scale
+
+  let best = null
+
+  for (const item of boxes) {
+    const rect = projectBoxToCameraRect(item, app.state.currentView)
+
+    if (!rect) {
+      continue
+    }
+
+    const left = rect.x
+    const right = rect.x + rect.width
+    const bottom = rect.y
+    const top = rect.y + rect.height
+
+    const points = [
+      { type: 'box-corner', key: 'bottom-left', x: left, y: bottom },
+      { type: 'box-corner', key: 'bottom-right', x: right, y: bottom },
+      { type: 'box-corner', key: 'top-right', x: right, y: top },
+      { type: 'box-corner', key: 'top-left', x: left, y: top }
+    ]
+
+    for (const target of points) {
+      const distance = getDistance(local, target)
+
+      if (distance > toleranceLocal) continue
+      if (best && distance >= best.distance) continue
+
+      best = {
+        ...target,
+        distance
+      }
+    }
+
+    const edges = [
+      {
+        type: 'box-edge',
+        key: 'bottom',
+        x: clampValue(local.x, left, right),
+        y: bottom
+      },
+      {
+        type: 'box-edge',
+        key: 'top',
+        x: clampValue(local.x, left, right),
+        y: top
+      },
+      {
+        type: 'box-edge',
+        key: 'left',
+        x: left,
+        y: clampValue(local.y, bottom, top)
+      },
+      {
+        type: 'box-edge',
+        key: 'right',
+        x: right,
+        y: clampValue(local.y, bottom, top)
+      }
+    ]
+
+    for (const target of edges) {
+      const distance = getDistance(local, target)
+
+      if (distance > toleranceLocal) continue
+      if (best && distance >= best.distance) continue
+
+      best = {
+        ...target,
+        distance
+      }
+    }
+  }
+
+  if (!best) {
+    return null
+  }
+
+  return {
+    active: true,
+    point: {
+      x: best.x,
+      y: best.y
+    },
+    snap: best
+  }
+} // End getExistingBoxSnapResult
 //=================
 function getBoxSnapLocal(local) {
   if (app.state.currentTool !== 'box') return local
@@ -299,11 +399,19 @@ function getBoxSnapLocal(local) {
 
   const wallRect = projectBoxToCameraRect(getWallBox3D(), app.state.currentView)
   const tolerance = 18 / (app.state.viewport.localScale * app.state.viewport.zoom)
-  const snapResult = getWallSnapResult(local, wallRect, tolerance)
 
-  drawing.setSnapPreview(snapResult.active ? snapResult.snap : null)
+  const boxSnapResult = getExistingBoxSnapResult(local, 18)
 
-  return snapResult.point
+  if (boxSnapResult && boxSnapResult.active) {
+    drawing.setSnapPreview(boxSnapResult.snap)
+    return boxSnapResult.point
+  }
+
+  const wallSnapResult = getWallSnapResult(local, wallRect, tolerance)
+
+  drawing.setSnapPreview(wallSnapResult.active ? wallSnapResult.snap : null)
+
+  return wallSnapResult.point
 } // End getBoxSnapLocal
 
 //=================
@@ -733,7 +841,30 @@ function onPointerDown(event) {
 //=================
 function onPointerMove(event) {
   const rawLocal = localFromEvent(event)
-  const local = getBoxSnapLocal(rawLocal)
+
+  if (panning && panStart && panOriginal) {
+    app.setPan(
+      panOriginal.x + event.clientX - panStart.x,
+      panOriginal.y + event.clientY - panStart.y
+    )
+    draw()
+    return
+  }
+
+  if (app.state.currentTool === 'box') {
+    const local = getBoxSnapLocal(rawLocal)
+
+    hoverDim.value = null
+
+    if (box.state.draft.active) {
+      box.updateDraft(local)
+    }
+
+    draw()
+    return
+  }
+
+  const local = rawLocal
   const canvasRect = canvasRef.value.getBoundingClientRect()
   const screenX = event.clientX - canvasRect.left
   const screenY = event.clientY - canvasRect.top
@@ -754,25 +885,6 @@ function onPointerMove(event) {
   )
 
   hoverDim.value = boxDimHit || wallDimHit
-
-  if (panning && panStart && panOriginal) {
-    app.setPan(
-      panOriginal.x + event.clientX - panStart.x,
-      panOriginal.y + event.clientY - panStart.y
-    )
-    draw()
-    return
-  }
-
-  if (app.state.currentTool === 'box') {
-    if (box.state.draft.active) {
-      box.updateDraft(local)
-    }
-
-    updateHover(rawLocal)
-    draw()
-    return
-  }
 
   if (drawing.state.drag.active) {
     const snapResult = createMoveSnapResult(
