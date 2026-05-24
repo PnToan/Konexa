@@ -14,11 +14,14 @@
     <input
       v-if="dimInput.active"
       ref="dimInputRef"
-      type="number"
+      type="text"
+      inputmode="decimal"
       class="mn-dim-input"
       :style="dimInputStyle"
       v-model="dimInput.value"
-      @keydown="onDimInputKeyDown"
+      @pointerdown.stop
+      @click.stop
+      @keydown.stop="onDimInputKeyDown"
       @blur="cancelDimInput"
     />
 
@@ -618,9 +621,17 @@ function openDimInput(dimHit) {
   }
   app.clearCommand()
   nextTick(() => {
-    dimInputRef.value?.focus()
-    dimInputRef.value?.select()
+    const input = dimInputRef.value
+    if (!input) return
+
+    input.focus()
+    input.select()
+
+    if (typeof input.setSelectionRange === 'function') {
+      input.setSelectionRange(0, String(dimInput.value.value).length)
+    }
   })
+
   draw()
 } // End openDimInput
 //=================
@@ -707,7 +718,6 @@ function commitBoxHeightInput() {
 // End commitBoxHeightInput
 
 //=================
-//=================
 function onBoxHeightInputKeyDown(event) {
   const isSpace = event.key === ' ' || event.key === 'Spacebar' || event.code === 'Space'
 
@@ -764,12 +774,14 @@ function commitDimInput() {
 function onDimInputKeyDown(event) {
   if (event.key === 'Enter') {
     event.preventDefault()
+    event.stopPropagation()
     commitDimInput()
     return
   }
 
   if (event.key === 'Escape') {
     event.preventDefault()
+    event.stopPropagation()
     cancelDimInput()
   }
 } // End onDimInputKeyDown
@@ -1112,11 +1124,10 @@ onMounted(() => {
   resizeCanvas()
   drawing.rebuildZones()
   window.addEventListener('resize', resizeCanvas)
-  window.addEventListener('keydown', onKeyDown)
 })
+
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCanvas)
-  window.removeEventListener('keydown', onKeyDown)
 })
 </script>
 <style scoped>
