@@ -1079,6 +1079,29 @@ watch(() => [box.state.boxes.length, box.state.selectedBoxId, box.state.editingD
   drawing.rebuildZones()
   draw()
 })
+watch(() => app.state.currentTool, (tool) => {
+  if (tool !== 'select') {
+    return
+  }
+
+  dimInput.value.active = false
+  dimInput.value.key = null
+  dimInput.value.boxId = null
+  dimInput.value.target = null
+
+  boxHeightInput.value.active = false
+  boxHeightInput.value.value = ''
+
+  box.cancelDraft()
+  wall.clearEditingDim()
+  box.clearEditingDim()
+  drawing.clearPanelInput()
+  drawing.setHover(null)
+  drawing.clearSnapPreview()
+  hoverDim.value = null
+
+  draw()
+})
 onMounted(() => {
   resizeCanvas()
   drawing.rebuildZones()
