@@ -645,13 +645,41 @@ function openBoxHeightInput(event) {
   })
 } // End openBoxHeightInput
 //=================
-function cancelBoxHeightInput() {
+function exitToSelect() {
+  dimInput.value.active = false
+  dimInput.value.key = null
+  dimInput.value.boxId = null
+  dimInput.value.target = null
+
   boxHeightInput.value.active = false
   boxHeightInput.value.value = ''
+
   box.cancelDraft()
+  wall.clearEditingDim()
+  box.clearEditingDim()
+  drawing.clearPanelInput()
+  drawing.setHover(null)
+  drawing.clearSnapPreview()
+  hoverDim.value = null
+
+  if (typeof app.clearCommand === 'function') {
+    app.clearCommand()
+  }
+
+  app.setTool('select')
+  app.setStatus('Đã hủy lệnh')
+
   draw()
-}
-// End cancelBoxHeightInput
+} // End exitToSelect
+
+//=================
+function cancelBoxHeightInput() {
+  if (!boxHeightInput.value.active) {
+    return
+  }
+
+  exitToSelect()
+} // End cancelBoxHeightInput
 
 //=================
 function commitBoxHeightInput() {
@@ -662,43 +690,65 @@ function commitBoxHeightInput() {
     return
   }
 
-  box.commitDraft(height)
+  const newBox = box.commitDraft(height)
+
   boxHeightInput.value.active = false
   boxHeightInput.value.value = ''
 
-  drawing.rebuildZones()
+  if (newBox) {
+    drawing.rebuildZones()
+    app.setStatus(`Đã tạo ${newBox.name}`)
+  } else {
+    app.setStatus('Box quá nhỏ, chưa tạo')
+  }
+
   draw()
-}
+} // End commitBoxHeightInput
 // End commitBoxHeightInput
 
 //=================
+//=================
 function onBoxHeightInputKeyDown(event) {
+  const isSpace = event.key === ' ' || event.key === 'Spacebar' || event.code === 'Space'
+
+  if (isSpace) {
+    event.preventDefault()
+    event.stopPropagation()
+    exitToSelect()
+    return
+  }
+
   if (event.key === 'Enter') {
     event.preventDefault()
+    event.stopPropagation()
     commitBoxHeightInput()
     return
   }
 
   if (event.key === 'Escape') {
     event.preventDefault()
-    cancelBoxHeightInput()
+    event.stopPropagation()
+    exitToSelect()
   }
-}
-// End onBoxHeightInputKeyDown
+} // End onBoxHeightInputKeyDown
 //=================
 function commitDimInput() {
   const numberValue = Number(dimInput.value.value)
+
   if (!Number.isFinite(numberValue) || numberValue <= 0) {
     cancelDimInput()
     return
   }
+
   if (dimInput.value.target === 'box') {
-    box.setBoxSize(dimInput.value.boxId, dimInput.value.key, numberValue)
+    box.setBoxSize(dimInput.value.boxId, dimInput.value.key, numberValue, getWallBox3D())
+    drawing.rebuildZones()
     app.setStatus(`Đã cập nhật Box ${dimInput.value.key}: ${numberValue}mm`)
   } else {
     wall.setSize(dimInput.value.key, numberValue)
     app.setStatus(`Đã cập nhật Wall ${dimInput.value.key}: ${numberValue}mm`)
   }
+
   dimInput.value.active = false
   wall.clearEditingDim()
   box.clearEditingDim()
@@ -931,18 +981,25 @@ function onWheel(event) {
 }
 //=================
 function onKeyDown(event) {
-  if (dimInput.value.active) return
-
   const key = event.key
+  const isSpace = key === ' ' || key === 'Spacebar' || event.code === 'Space'
+
+  if (isSpace) {
+    event.preventDefault()
+    event.stopPropagation()
+    exitToSelect()
+    return
+  }
+
+  if (dimInput.value.active || boxHeightInput.value.active) {
+    return
+  }
 
   if (app.state.currentTool === 'panel') {
     if (app.state.currentView !== 'front') {
       if (key === 'Escape') {
         event.preventDefault()
-        app.setTool('select')
-        drawing.clearPanelInput()
-        drawing.setHover(null)
-        draw()
+        exitToSelect()
       }
 
       return
@@ -989,6 +1046,12 @@ function onKeyDown(event) {
     }
   }
 
+  if (key === 'Escape') {
+    event.preventDefault()
+    exitToSelect()
+    return
+  }
+
   if (key === 'm' || key === 'M') {
     app.setTool('move')
     draw()
@@ -1020,8 +1083,12 @@ onMounted(() => {
   resizeCanvas()
   drawing.rebuildZones()
   window.addEventListener('resize', resizeCanvas)
+  window.addEventListener('keydown', onKeyDown)
 })
-onBeforeUnmount(() => window.removeEventListener('resize', resizeCanvas))
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeCanvas)
+  window.removeEventListener('keydown', onKeyDown)
+})
 </script>
 <style scoped>
 .mn-cursor-move {
@@ -1034,6 +1101,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeCanvas))
 
 .mn-cursor-select {
   cursor: default;
+}
+
+.mn-cursor-crosshair {
+  cursor: crosshair;
 }
 
 .mn-cursor-default {

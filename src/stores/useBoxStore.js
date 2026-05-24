@@ -112,15 +112,29 @@ const store = createSimpleStore({
     state.editingDim = null
   }, // End clearEditingDim
 
-  //=================
-  setBoxSize(boxId, key, value) {
-    if (!['width', 'depth', 'height'].includes(key)) return
+//=================
+setBoxSize(boxId, key, value, wallBox = null) {
+  if (!['width', 'depth', 'height'].includes(key)) return
 
-    const box = state.boxes.find((item) => item.id === boxId)
-    if (!box) return
+  const box = state.boxes.find((item) => item.id === boxId)
+  if (!box) return
 
-    box[key] = normalizePositiveNumber(value, box[key] || 1)
-  }, // End setBoxSize
+  const nextValue = normalizePositiveNumber(value, box[key] || 1)
+
+  if (key === 'depth') {
+    const backY = box.y + box.depth
+    const wallMinY = wallBox ? wallBox.y : -Infinity
+
+    const maxDepth = backY - wallMinY
+    const nextDepth = Math.min(nextValue, Math.max(1, maxDepth))
+
+    box.y = backY - nextDepth
+    box.depth = nextDepth
+    return
+  }
+
+  box[key] = nextValue
+}, // End setBoxSize
 
   //=================
   getSelectedBox() {
