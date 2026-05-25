@@ -529,8 +529,8 @@ function drawMoveCursorIcon(ctx, viewport, moveCursorLocal) {
   if (!moveCursorLocal) return
 
   const point = localToScreen(viewport, moveCursorLocal.x, moveCursorLocal.y)
-  const x = point.x + 12
-  const y = point.y + 16
+  const x = point.x + 18
+  const y = point.y + 30
   const size = 13
   const half = size / 2
 
