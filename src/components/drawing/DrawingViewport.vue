@@ -88,6 +88,7 @@ const boxHeightInput = ref({
 })
 
 const hoverDim = ref(null)
+const moveCopyMode = ref(false)
 let ctx = null
 let ratio = 1
 let panning = false
@@ -168,6 +169,7 @@ function draw() {
     moveCursorLocal: app.state.currentTool === 'move'
       ? drawing.getMoveCursorLocal()
       : null,
+    moveCopyMode: app.state.currentTool === 'move' ? moveCopyMode.value : false,
     panelPreviewItems: drawing.getPanelPreviewItems(),
     panelInputBuffer: drawing.state.panelInputBuffer,
     boxes: box.state.boxes,
@@ -660,6 +662,7 @@ function exitToSelect() {
   panOriginal = null
 
   hoverDim.value = null
+  moveCopyMode.value = false
 
   drawing.resetMoveTool()
   drawing.clearSnapPreview()
@@ -878,6 +881,7 @@ function onPointerDown(event) {
         rawLocal,
         app.state.viewport,
         event.shiftKey,
+        moveCopyMode.value,
         app.state.currentView
       )
 
@@ -1076,6 +1080,18 @@ function onKeyDown(event) {
     return
   }
 
+  if (app.state.currentTool === 'move' && (key === 'Control' || event.code === 'ControlLeft' || event.code === 'ControlRight')) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (event.repeat) return
+
+    moveCopyMode.value = !moveCopyMode.value
+    app.setStatus(moveCopyMode.value ? 'Move: Copy đang bật' : 'Move: Copy đã tắt')
+    draw()
+    return
+  }
+
   if (app.state.currentTool === 'panel') {
     if (app.state.currentView !== 'front') {
       return
@@ -1115,6 +1131,7 @@ function onKeyDown(event) {
 
   if (key === 'm' || key === 'M') {
     event.preventDefault()
+    moveCopyMode.value = false
     app.setTool('move')
     drawing.resetMoveTool()
     app.setStatus('Move: chọn điểm snap của tấm hoặc Box')
@@ -1144,7 +1161,12 @@ watch(() => [box.state.boxes.length, box.state.selectedBoxId, box.state.editingD
   draw()
 })
 watch(() => app.state.currentTool, (tool) => {
+  if (tool !== 'move') {
+    moveCopyMode.value = false
+  }
+
   if (tool === 'move') {
+    moveCopyMode.value = false
     hoverDim.value = null
     drawing.resetMoveTool()
     app.setStatus('Move: chọn điểm snap của tấm hoặc Box')

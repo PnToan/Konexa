@@ -532,7 +532,7 @@ function drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer) {
   ctx.restore()
 } // End drawPanelInputBuffer
 //=================
-function drawMoveCursorIcon(ctx, viewport, moveCursorLocal) {
+function drawMoveCursorIcon(ctx, viewport, moveCursorLocal, moveCopyMode = false) {
   if (!moveCursorLocal) return
 
   const point = localToScreen(viewport, moveCursorLocal.x, moveCursorLocal.y)
@@ -548,9 +548,9 @@ function drawMoveCursorIcon(ctx, viewport, moveCursorLocal) {
   ctx.scale(0.4, 0.4)
   ctx.translate(-point.x, -point.y)
 
-  ctx.strokeStyle = '#000000'
+  ctx.strokeStyle = moveCopyMode ? '#ff8c00' : '#000000'
   ctx.fillStyle = '#ffffff'
-  ctx.lineWidth = 2
+  ctx.lineWidth = moveCopyMode ? 4 : 2
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
@@ -884,6 +884,7 @@ export function renderCanvas2D(ctx, payload) {
     moveHoverSnapPoints,
     moveTargetSnap,
     moveCursorLocal,
+    moveCopyMode,
     panelPreviewItems,
     panelInputBuffer,
     boxes,
@@ -918,6 +919,6 @@ export function renderCanvas2D(ctx, payload) {
   drawPanelPreviewItems(ctx, viewport, panelPreviewItems, hover, currentView)
   drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer)
   drawSnapPreview(ctx, viewport, snapPreview)
-  drawMoveCursorIcon(ctx, viewport, moveCursorLocal)
+  drawMoveCursorIcon(ctx, viewport, moveCursorLocal, moveCopyMode)
   drawRulers(ctx, viewport, width, height)
 } // End renderCanvas2D

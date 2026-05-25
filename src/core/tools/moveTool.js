@@ -24,6 +24,53 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
 } // End clamp
 
+
+//=================
+function buildMoveCopyId(baseId, items = []) {
+  const safeBaseId = String(baseId || 'copy')
+  const existingIds = new Set((items || []).map((item) => String(item?.id || '')))
+
+  let index = 1
+  let nextId = `${safeBaseId}_copy_${String(index).padStart(3, '0')}`
+
+  while (existingIds.has(nextId)) {
+    index += 1
+    nextId = `${safeBaseId}_copy_${String(index).padStart(3, '0')}`
+  }
+
+  return nextId
+} // End buildMoveCopyId
+
+//=================
+function buildMoveCopyName(baseName, fallbackName, items = []) {
+  const safeBaseName = String(baseName || fallbackName || 'Copy')
+  const existingNames = new Set((items || []).map((item) => String(item?.name || '')))
+
+  let index = 1
+  let nextName = `${safeBaseName} Copy ${String(index).padStart(3, '0')}`
+
+  while (existingNames.has(nextName)) {
+    index += 1
+    nextName = `${safeBaseName} Copy ${String(index).padStart(3, '0')}`
+  }
+
+  return nextName
+} // End buildMoveCopyName
+
+//=================
+function createMoveCopyTarget(targetType, previewTarget, panels = [], boxes = []) {
+  if (!previewTarget) return null
+
+  const sourceItems = targetType === 'box' ? boxes : panels
+  const fallbackName = targetType === 'box' ? 'Box' : 'Tấm'
+
+  return {
+    ...previewTarget,
+    id: buildMoveCopyId(previewTarget.id, sourceItems),
+    name: buildMoveCopyName(previewTarget.name, fallbackName, sourceItems)
+  }
+} // End createMoveCopyTarget
+
 //=================
 export function createMoveState() {
   return {
@@ -794,7 +841,7 @@ export function previewMoveToTarget(moveState, panels = [], boxes = [], localPoi
 } // End previewMoveToTarget
 
 //=================
-export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoint, viewport, lockAxis = false, currentView = 'front') {
+export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoint, viewport, lockAxis = false, currentView = 'front', copyMode = false) {
   if (!moveState.active || moveState.phase !== 'pick-target') {
     return {
       moveState,
@@ -823,6 +870,36 @@ export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoin
     }
   }
 
+  if (copyMode) {
+    const copiedTarget = createMoveCopyTarget(
+      nextMoveState.targetType,
+      nextMoveState.previewTarget,
+      panels,
+      boxes
+    )
+
+    if (!copiedTarget) {
+      return {
+        moveState: resetMoveState(),
+        panels,
+        boxes,
+        movedTarget: null
+      }
+    }
+
+    return {
+      moveState: resetMoveState(),
+      panels: nextMoveState.targetType === 'panel' ? [...panels, copiedTarget] : panels,
+      boxes: nextMoveState.targetType === 'box' ? [...boxes, copiedTarget] : boxes,
+      movedTarget: {
+        type: nextMoveState.targetType,
+        id: copiedTarget.id,
+        target: copiedTarget,
+        copyMode: true
+      }
+    }
+  }
+
   const nextPanels = panels.map((panel) => {
     if (nextMoveState.targetType !== 'panel') return panel
     if (panel.id !== nextMoveState.targetId) return panel
@@ -844,7 +921,8 @@ export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoin
     movedTarget: {
       type: nextMoveState.targetType,
       id: nextMoveState.targetId,
-      target: nextMoveState.previewTarget
+      target: nextMoveState.previewTarget,
+      copyMode: false
     }
   }
 } // End commitMoveToTarget

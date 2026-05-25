@@ -594,7 +594,7 @@ const store = createSimpleStore({
   }, // End previewCadMove
 
   //=================
-  commitCadMove(localPoint, viewport, lockAxis = false, currentView = 'front') {
+  commitCadMove(localPoint, viewport, lockAxis = false, copyMode = false, currentView = 'front') {
     const boxStore = useBoxStore()
 
     const result = commitMoveToTarget(
@@ -604,7 +604,8 @@ const store = createSimpleStore({
       localPoint,
       viewport,
       lockAxis,
-      currentView
+      currentView,
+      copyMode
     )
 
     state.move = result.moveState
@@ -616,13 +617,13 @@ const store = createSimpleStore({
       state.selectedPanelId = result.movedTarget.id
       boxStore.clearSelection()
       this.rebuildZones()
-      useAppStore().setStatus('Đã di chuyển tấm')
+      useAppStore().setStatus(result.movedTarget.copyMode ? 'Đã copy tấm' : 'Đã di chuyển tấm')
     }
 
     if (result.movedTarget?.type === 'box') {
       state.selectedPanelId = null
       boxStore.selectBox(result.movedTarget.id)
-      useAppStore().setStatus('Đã di chuyển Box')
+      useAppStore().setStatus(result.movedTarget.copyMode ? 'Đã copy Box' : 'Đã di chuyển Box')
     }
 
     return result.movedTarget
