@@ -561,7 +561,15 @@ function resolveMoveTargetPoint(moveState, panels = [], boxes = [], localPoint, 
   let bestSnap = null
 
   if (pointSnap && edgeSnap) {
-    bestSnap = pointSnap.distance <= edgeSnap.distance ? pointSnap : edgeSnap
+    // Ưu tiên góc và tâm cạnh nếu đang gần điểm đó.
+    // Nếu không có đoạn này, edge snap dễ thắng và renderer sẽ vẽ vuông.
+    if (pointSnap.type === 'corner' || pointSnap.type === 'midpoint') {
+      bestSnap = pointSnap.distance <= edgeSnap.distance + tolerance * 0.35
+        ? pointSnap
+        : edgeSnap
+    } else {
+      bestSnap = pointSnap.distance <= edgeSnap.distance ? pointSnap : edgeSnap
+    }
   } else {
     bestSnap = pointSnap || edgeSnap
   }

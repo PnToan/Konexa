@@ -630,8 +630,12 @@ function drawMoveTargetSnap(ctx, viewport, moveTargetSnap) {
   if (!moveTargetSnap) return
 
   const point = localToScreen(viewport, moveTargetSnap.x, moveTargetSnap.y)
+
   if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return
-  const isRoundSnap = moveTargetSnap.type === 'corner' || moveTargetSnap.type === 'midpoint'
+
+  const isRoundSnap =
+    moveTargetSnap.type === 'corner' ||
+    moveTargetSnap.type === 'midpoint'
 
   ctx.save()
 
