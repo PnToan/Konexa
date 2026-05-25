@@ -490,9 +490,14 @@ function resolveMoveTargetPoint(moveState, panels = [], boxes = [], localPoint, 
 
   const pointSnap = findNearestPointSnap(localPoint, targets, tolerance)
   const edgeSnap = findNearestEdgeSnap(localPoint, targets, tolerance)
-  const bestSnap = pointSnap && edgeSnap
-    ? pointSnap.distance <= edgeSnap.distance ? pointSnap : edgeSnap
-    : pointSnap || edgeSnap
+
+  let bestSnap = null
+
+  if (pointSnap && edgeSnap) {
+    bestSnap = pointSnap.distance <= edgeSnap.distance ? pointSnap : edgeSnap
+  } else {
+    bestSnap = pointSnap || edgeSnap
+  }
 
   if (!bestSnap) {
     return {
@@ -506,8 +511,8 @@ function resolveMoveTargetPoint(moveState, panels = [], boxes = [], localPoint, 
 
   return {
     point: {
-      x: bestSnap.x,
-      y: bestSnap.y
+      x: toNumber(bestSnap.x),
+      y: toNumber(bestSnap.y)
     },
     snap: bestSnap
   }
@@ -552,20 +557,35 @@ function applyPanelAxisDelta(panel, axis, delta) {
   const next = { ...panel }
 
   if (axis === 'x') {
-    next.x3d = toNumber(next.x3d ?? next.x, 0) + delta
-    next.x = toNumber(next.x ?? next.x3d, 0) + delta
+    const sourceX = toNumber(panel.x3d ?? panel.x, 0)
+    const nextX = sourceX + delta
+
+    next.x3d = nextX
+    next.x = nextX
+
+    return next
   }
 
   if (axis === 'y') {
-    next.y3d = toNumber(next.y3d ?? next.worldY ?? next.depthY ?? next.y, 0) + delta
-    next.worldY = toNumber(next.worldY ?? next.y3d, next.y3d) + delta
-    next.depthY = toNumber(next.depthY ?? next.y3d, next.y3d) + delta
+    const sourceY = toNumber(panel.y3d ?? panel.worldY ?? panel.depthY ?? panel.y3d, 0)
+    const nextY = sourceY + delta
+
+    next.y3d = nextY
+    next.worldY = nextY
+    next.depthY = nextY
+
+    return next
   }
 
   if (axis === 'z') {
-    next.z3d = toNumber(next.z3d ?? next.z ?? next.y, 0) + delta
-    next.z = toNumber(next.z ?? next.z3d, 0) + delta
-    next.y = toNumber(next.y ?? next.z3d, 0) + delta
+    const sourceZ = toNumber(panel.z3d ?? panel.z ?? panel.y, 0)
+    const nextZ = sourceZ + delta
+
+    next.z3d = nextZ
+    next.z = nextZ
+    next.y = nextZ
+
+    return next
   }
 
   return next
@@ -587,18 +607,33 @@ function applyBoxAxisDelta(box, axis, delta) {
   const next = { ...box }
 
   if (axis === 'x') {
-    next.x = toNumber(next.x, 0) + delta
-    next.x3d = toNumber(next.x3d ?? next.x, next.x) + delta
+    const sourceX = toNumber(box.x, 0)
+    const nextX = sourceX + delta
+
+    next.x = nextX
+    next.x3d = nextX
+
+    return next
   }
 
   if (axis === 'y') {
-    next.y = toNumber(next.y, 0) + delta
-    next.y3d = toNumber(next.y3d ?? next.y, next.y) + delta
+    const sourceY = toNumber(box.y, 0)
+    const nextY = sourceY + delta
+
+    next.y = nextY
+    next.y3d = nextY
+
+    return next
   }
 
   if (axis === 'z') {
-    next.z = toNumber(next.z, 0) + delta
-    next.z3d = toNumber(next.z3d ?? next.z, next.z) + delta
+    const sourceZ = toNumber(box.z, 0)
+    const nextZ = sourceZ + delta
+
+    next.z = nextZ
+    next.z3d = nextZ
+
+    return next
   }
 
   return next
@@ -634,7 +669,7 @@ export function previewMoveToTarget(moveState, panels = [], boxes = [], localPoi
     return moveState
   }
 
-  if (!moveState.originalTarget || !moveState.basePoint) {
+  if (!moveState.originalTarget || !moveState.basePoint || !localPoint) {
     return moveState
   }
 
@@ -663,6 +698,15 @@ export function previewMoveToTarget(moveState, panels = [], boxes = [], localPoi
     dy,
     currentView
   )
+
+  if (!previewTarget) {
+    return {
+      ...moveState,
+      cursorLocal: localPoint ? { ...localPoint } : null,
+      targetSnap: null,
+      previewTarget: null
+    }
+  }
 
   return {
     ...moveState,

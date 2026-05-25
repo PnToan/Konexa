@@ -576,56 +576,74 @@ const store = createSimpleStore({
   previewCadMove(localPoint, viewport, lockAxis = false, currentView = 'front') {
     const boxStore = useBoxStore()
 
-    state.move = previewMoveToTarget(
-      state.move,
-      state.panels,
-      boxStore.state.boxes,
-      localPoint,
-      viewport,
-      lockAxis,
-      currentView
-    )
+    try {
+      state.move = previewMoveToTarget(
+        state.move,
+        state.panels,
+        boxStore.state.boxes,
+        localPoint,
+        viewport,
+        lockAxis,
+        currentView
+      )
 
-    // Không dùng snapPreview chung trong Move.
-    // Move đã có moveTargetSnap riêng để renderer vẽ.
-    state.snapPreview = null
+      state.snapPreview = null
 
-    return state.move.previewTarget || null
+      return state.move.previewTarget || null
+    } catch (error) {
+      console.error('Move preview error:', error)
+
+      state.move = createMoveState()
+      state.snapPreview = null
+      useAppStore().setStatus('Move bị lỗi preview, đã hủy lệnh')
+
+      return null
+    }
   }, // End previewCadMove
 
   //=================
   commitCadMove(localPoint, viewport, lockAxis = false, currentView = 'front') {
     const boxStore = useBoxStore()
 
-    const result = commitMoveToTarget(
-      state.move,
-      state.panels,
-      boxStore.state.boxes,
-      localPoint,
-      viewport,
-      lockAxis,
-      currentView
-    )
+    try {
+      const result = commitMoveToTarget(
+        state.move,
+        state.panels,
+        boxStore.state.boxes,
+        localPoint,
+        viewport,
+        lockAxis,
+        currentView
+      )
 
-    state.move = result.moveState
-    state.panels = result.panels
-    boxStore.setBoxes(result.boxes)
-    state.snapPreview = null
+      state.move = result.moveState
+      state.panels = result.panels
+      boxStore.setBoxes(result.boxes)
+      state.snapPreview = null
 
-    if (result.movedTarget?.type === 'panel') {
-      state.selectedPanelId = result.movedTarget.id
-      boxStore.clearSelection()
-      this.rebuildZones()
-      useAppStore().setStatus('Đã di chuyển tấm')
+      if (result.movedTarget?.type === 'panel') {
+        state.selectedPanelId = result.movedTarget.id
+        boxStore.clearSelection()
+        this.rebuildZones()
+        useAppStore().setStatus('Đã di chuyển tấm')
+      }
+
+      if (result.movedTarget?.type === 'box') {
+        state.selectedPanelId = null
+        boxStore.selectBox(result.movedTarget.id)
+        useAppStore().setStatus('Đã di chuyển Box')
+      }
+
+      return result.movedTarget
+    } catch (error) {
+      console.error('Move commit error:', error)
+
+      state.move = createMoveState()
+      state.snapPreview = null
+      useAppStore().setStatus('Move bị lỗi commit, đã hủy lệnh')
+
+      return null
     }
-
-    if (result.movedTarget?.type === 'box') {
-      state.selectedPanelId = null
-      boxStore.selectBox(result.movedTarget.id)
-      useAppStore().setStatus('Đã di chuyển Box')
-    }
-
-    return result.movedTarget
   }, // End commitCadMove
 
   //=================
