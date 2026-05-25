@@ -353,7 +353,6 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelId, currentView = '
   })
 } // End drawPanels
 
-
 //=================
 function drawMovePreviewTarget(ctx, viewport, movePreviewTarget, currentView = 'front') {
   if (!movePreviewTarget?.target) return
@@ -361,32 +360,38 @@ function drawMovePreviewTarget(ctx, viewport, movePreviewTarget, currentView = '
   const targetType = movePreviewTarget.type
   const target = movePreviewTarget.target
 
-  ctx.save()
-  ctx.setLineDash([8, 5])
+  let rect = null
 
   if (targetType === 'panel') {
-    const rect = getPanelRect(target, currentView)
-
-    if (rect) {
-      drawRectLocal(ctx, viewport, rect, {
-        fill: 'rgba(37, 99, 235, 0.22)',
-        stroke: '#2563eb',
-        lineWidth: 2
-      })
-    }
+    rect = getPanelRect(target, currentView)
   }
 
   if (targetType === 'box') {
-    const rect = projectBoxToCameraRect(target, currentView)
-
-    if (rect) {
-      drawRectLocal(ctx, viewport, rect, {
-        fill: 'rgba(37, 99, 235, 0.18)',
-        stroke: '#2563eb',
-        lineWidth: 2
-      })
-    }
+    rect = projectBoxToCameraRect(target, currentView)
   }
+
+  if (
+    !rect ||
+    !Number.isFinite(rect.x) ||
+    !Number.isFinite(rect.y) ||
+    !Number.isFinite(rect.width) ||
+    !Number.isFinite(rect.height) ||
+    rect.width <= 0 ||
+    rect.height <= 0
+  ) {
+    return
+  }
+
+  ctx.save()
+  ctx.setLineDash([8, 5])
+
+  drawRectLocal(ctx, viewport, rect, {
+    fill: targetType === 'panel'
+      ? 'rgba(37, 99, 235, 0.22)'
+      : 'rgba(37, 99, 235, 0.18)',
+    stroke: '#2563eb',
+    lineWidth: 2
+  })
 
   ctx.restore()
 } // End drawMovePreviewTarget
@@ -399,13 +404,15 @@ function drawMoveHoverSnapPoints(ctx, viewport, moveHoverSnapPoints = []) {
 
   moveHoverSnapPoints.forEach((snapPoint) => {
     const point = localToScreen(viewport, snapPoint.x, snapPoint.y)
+    const active = snapPoint.active === true
+    const radius = active ? 6 : 3
 
-    ctx.fillStyle = '#ffffff'
-    ctx.strokeStyle = '#ff9f1a'
-    ctx.lineWidth = 2
+    ctx.fillStyle = active ? '#ff9f1a' : '#ffffff'
+    ctx.strokeStyle = active ? '#ff7a00' : '#2563eb'
+    ctx.lineWidth = active ? 2.5 : 1.5
 
     ctx.beginPath()
-    ctx.arc(point.x, point.y, 6, 0, Math.PI * 2)
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2)
     ctx.fill()
     ctx.stroke()
   })
@@ -529,45 +536,90 @@ function drawMoveCursorIcon(ctx, viewport, moveCursorLocal) {
   if (!moveCursorLocal) return
 
   const point = localToScreen(viewport, moveCursorLocal.x, moveCursorLocal.y)
-  const x = point.x + 18
-  const y = point.y + 30
-  const size = 13
-  const half = size / 2
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return
+  const hotspotX = -4
+  const hotspotY = -6
+
+  const x = point.x + hotspotX
+  const y = point.y + hotspotY
 
   ctx.save()
+  ctx.translate(point.x, point.y)
+  ctx.scale(0.4, 0.4)
+  ctx.translate(-point.x, -point.y)
 
-  ctx.strokeStyle = '#111827'
+  ctx.strokeStyle = '#000000'
   ctx.fillStyle = '#ffffff'
   ctx.lineWidth = 2
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
+  // Mouse pointer
   ctx.beginPath()
-  ctx.arc(x, y, 10, 0, Math.PI * 2)
+  ctx.moveTo(x, y)
+  ctx.lineTo(x + 15, y + 48)
+  ctx.lineTo(x + 29, y + 34)
+  ctx.lineTo(x + 50, y + 34)
+  ctx.closePath()
   ctx.fill()
   ctx.stroke()
 
+  // Move icon center
+  const cx = x + 55
+  const cy = y + 65
+  const arrowLength = 28
+  const arrowWidth = 10
+
+  // Up arrow
   ctx.beginPath()
-  ctx.moveTo(x - half, y)
-  ctx.lineTo(x + half, y)
-  ctx.moveTo(x, y - half)
-  ctx.lineTo(x, y + half)
-  ctx.moveTo(x + half, y)
-  ctx.lineTo(x + half - 4, y - 4)
-  ctx.moveTo(x + half, y)
-  ctx.lineTo(x + half - 4, y + 4)
-  ctx.moveTo(x - half, y)
-  ctx.lineTo(x - half + 4, y - 4)
-  ctx.moveTo(x - half, y)
-  ctx.lineTo(x - half + 4, y + 4)
-  ctx.moveTo(x, y - half)
-  ctx.lineTo(x - 4, y - half + 4)
-  ctx.moveTo(x, y - half)
-  ctx.lineTo(x + 4, y - half + 4)
-  ctx.moveTo(x, y + half)
-  ctx.lineTo(x - 4, y + half - 4)
-  ctx.moveTo(x, y + half)
-  ctx.lineTo(x + 4, y + half - 4)
+  ctx.moveTo(cx, cy - arrowLength)
+  ctx.lineTo(cx - arrowWidth, cy - arrowLength + 14)
+  ctx.lineTo(cx - 4, cy - arrowLength + 10)
+  ctx.lineTo(cx - 4, cy - 6)
+  ctx.lineTo(cx + 4, cy - 6)
+  ctx.lineTo(cx + 4, cy - arrowLength + 10)
+  ctx.lineTo(cx + arrowWidth, cy - arrowLength + 14)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+
+  // Down arrow
+  ctx.beginPath()
+  ctx.moveTo(cx, cy + arrowLength)
+  ctx.lineTo(cx - arrowWidth, cy + arrowLength - 14)
+  ctx.lineTo(cx - 4, cy + arrowLength - 10)
+  ctx.lineTo(cx - 4, cy + 6)
+  ctx.lineTo(cx + 4, cy + 6)
+  ctx.lineTo(cx + 4, cy + arrowLength - 10)
+  ctx.lineTo(cx + arrowWidth, cy + arrowLength - 14)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+
+  // Left arrow
+  ctx.beginPath()
+  ctx.moveTo(cx - arrowLength, cy)
+  ctx.lineTo(cx - arrowLength + 14, cy - arrowWidth)
+  ctx.lineTo(cx - arrowLength + 10, cy - 4)
+  ctx.lineTo(cx - 6, cy - 4)
+  ctx.lineTo(cx - 6, cy + 4)
+  ctx.lineTo(cx - arrowLength + 10, cy + 4)
+  ctx.lineTo(cx - arrowLength + 14, cy + arrowWidth)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+
+  // Right arrow
+  ctx.beginPath()
+  ctx.moveTo(cx + arrowLength, cy)
+  ctx.lineTo(cx + arrowLength - 14, cy - arrowWidth)
+  ctx.lineTo(cx + arrowLength - 10, cy - 4)
+  ctx.lineTo(cx + 6, cy - 4)
+  ctx.lineTo(cx + 6, cy + 4)
+  ctx.lineTo(cx + arrowLength - 10, cy + 4)
+  ctx.lineTo(cx + arrowLength - 14, cy + arrowWidth)
+  ctx.closePath()
+  ctx.fill()
   ctx.stroke()
 
   ctx.restore()
@@ -578,14 +630,26 @@ function drawMoveTargetSnap(ctx, viewport, moveTargetSnap) {
   if (!moveTargetSnap) return
 
   const point = localToScreen(viewport, moveTargetSnap.x, moveTargetSnap.y)
-  const size = moveTargetSnap.type === 'edge' ? 10 : 9
-  const half = size / 2
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return
+  const isRoundSnap = moveTargetSnap.type === 'corner' || moveTargetSnap.type === 'midpoint'
 
   ctx.save()
 
   ctx.fillStyle = '#ffffff'
-  ctx.strokeStyle = '#22c55e'
+  ctx.strokeStyle = isRoundSnap ? '#ff7a00' : '#22c55e'
   ctx.lineWidth = 2
+
+  if (isRoundSnap) {
+    ctx.beginPath()
+    ctx.arc(point.x, point.y, 6, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+    ctx.restore()
+    return
+  }
+
+  const size = 10
+  const half = size / 2
 
   ctx.beginPath()
   ctx.rect(point.x - half, point.y - half, size, size)

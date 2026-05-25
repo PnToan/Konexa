@@ -155,56 +155,27 @@ function getRectCornerSnapPoints(rect, meta = {}) {
 } // End getRectCornerSnapPoints
 
 //=================
-function getRectSnapEdges(rect, meta = {}) {
+function getRectMiddleSnapPoints(rect, meta = {}) {
   if (!rect) return []
 
   const left = rect.x
   const right = rect.x + rect.width
   const bottom = rect.y
   const top = rect.y + rect.height
+  const centerX = rect.x + rect.width / 2
+  const centerY = rect.y + rect.height / 2
 
   return [
-    {
-      type: 'edge',
-      key: 'bottom',
-      orientation: 'horizontal',
-      x1: left,
-      y1: bottom,
-      x2: right,
-      y2: bottom
-    },
-    {
-      type: 'edge',
-      key: 'top',
-      orientation: 'horizontal',
-      x1: left,
-      y1: top,
-      x2: right,
-      y2: top
-    },
-    {
-      type: 'edge',
-      key: 'left',
-      orientation: 'vertical',
-      x1: left,
-      y1: bottom,
-      x2: left,
-      y2: top
-    },
-    {
-      type: 'edge',
-      key: 'right',
-      orientation: 'vertical',
-      x1: right,
-      y1: bottom,
-      x2: right,
-      y2: top
-    }
-  ].map((edge) => ({
-    ...edge,
-    ...meta
+    { type: 'midpoint', key: 'bottom-middle', x: centerX, y: bottom },
+    { type: 'midpoint', key: 'top-middle', x: centerX, y: top },
+    { type: 'midpoint', key: 'left-middle', x: left, y: centerY },
+    { type: 'midpoint', key: 'right-middle', x: right, y: centerY }
+  ].map((snapPoint, index) => ({
+    ...snapPoint,
+    ...meta,
+    id: `${meta.targetType}_${meta.targetId}_midpoint_${index}`
   }))
-} // End getRectSnapEdges
+} // End getRectMiddleSnapPoints
 
 //=================
 function getMoveTargetSnapPoints(targetType, target, currentView) {
@@ -330,13 +301,18 @@ export function updateMoveHover(moveState, panels = [], boxes = [], localPoint, 
     currentView
   )
 
+  const hoverSnapPoints = (hover.snapPoints || []).map((snapPoint) => ({
+    ...snapPoint,
+    active: Boolean(hover.snap && hover.snap.id === snapPoint.id)
+  }))
+
   return {
     ...moveState,
     cursorLocal: localPoint ? { ...localPoint } : null,
     hoverTargetType: hover.targetType,
     hoverTargetId: hover.target?.id || null,
     hoverSnap: hover.snap,
-    hoverSnapPoints: hover.snapPoints || []
+    hoverSnapPoints
   }
 } // End updateMoveHover
 
@@ -381,11 +357,14 @@ export function startMoveFromHover(moveState, panels = [], boxes = [], localPoin
     },
 
     originalTarget: { ...target },
-    previewTarget: { ...target },
+
+    // Click lần 1 chỉ chọn điểm gốc, chưa tạo preview.
+    previewTarget: null,
 
     hoverSnap: null,
     hoverSnapPoints: [],
     targetSnap: null,
+    cursorLocal: localPoint ? { ...localPoint } : null,
     lockAxis: null
   }
 } // End startMoveFromHover
@@ -408,6 +387,7 @@ function collectTargetSnapSources(panels = [], boxes = [], movingType, movingId,
     }
 
     points.push(...getRectCornerSnapPoints(rect, meta))
+    points.push(...getRectMiddleSnapPoints(rect, meta))
     edges.push(...getRectSnapEdges(rect, meta))
   })
 
@@ -424,6 +404,7 @@ function collectTargetSnapSources(panels = [], boxes = [], movingType, movingId,
     }
 
     points.push(...getRectCornerSnapPoints(rect, meta))
+    points.push(...getRectMiddleSnapPoints(rect, meta))
     edges.push(...getRectSnapEdges(rect, meta))
   })
 
@@ -445,7 +426,7 @@ function findNearestPointSnap(localPoint, targets, tolerance) {
 
     best = {
       ...target,
-      type: 'corner',
+      type: target.type || 'corner',
       distance
     }
   })

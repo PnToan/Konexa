@@ -121,10 +121,12 @@ const boxHeightInputStyle = computed(() => ({
 }))
 //=================
 const canvasCursorClass = computed(() => {
-  if (hoverDim.value) return 'mn-cursor-pointer'
+  if (app.state.currentTool === 'move') return 'mn-cursor-move'
+  if (hoverDim.value && app.state.currentTool === 'select') return 'mn-cursor-pointer'
   if (app.state.currentTool === 'box') return 'mn-cursor-box'
   if (app.state.currentTool === 'panel') return 'mn-cursor-crosshair'
   if (app.state.currentTool === 'select') return 'mn-cursor-select'
+
   return 'mn-cursor-default'
 }) // End canvasCursorClass
 function resizeCanvas() {
@@ -653,28 +655,36 @@ function openBoxHeightInput(event) {
 } // End openBoxHeightInput
 //=================
 function exitToSelect() {
-  dimInput.value.active = false
-  dimInput.value.key = null
-  dimInput.value.boxId = null
-  dimInput.value.target = null
+  panning = false
+  panStart = null
+  panOriginal = null
 
-  boxHeightInput.value.active = false
-  boxHeightInput.value.value = ''
-
-  box.cancelDraft()
-  wall.clearEditingDim()
-  box.clearEditingDim()
-  drawing.clearPanelInput()
-  drawing.setHover(null)
-  drawing.clearSnapPreview()
   hoverDim.value = null
 
-  if (typeof app.clearCommand === 'function') {
-    app.clearCommand()
+  drawing.resetMoveTool()
+  drawing.clearSnapPreview()
+  drawing.setHover(null)
+
+  if (boxHeightInput.value) {
+    boxHeightInput.value.active = false
+    boxHeightInput.value.text = ''
+    boxHeightInput.value.anchor = null
+  }
+
+  if (typeof box.clearDraft === 'function') {
+    box.clearDraft()
+  }
+
+  if (typeof box.clearEditingDim === 'function') {
+    box.clearEditingDim()
+  }
+
+  if (typeof drawing.clearPanelInputBuffer === 'function') {
+    drawing.clearPanelInputBuffer()
   }
 
   app.setTool('select')
-  app.setStatus('Đã hủy lệnh')
+  app.setStatus('Select')
 
   draw()
 } // End exitToSelect
@@ -870,6 +880,7 @@ function onPointerDown(event) {
         event.shiftKey,
         app.state.currentView
       )
+
       draw()
       return
     }
@@ -879,6 +890,7 @@ function onPointerDown(event) {
       app.state.viewport,
       app.state.currentView
     )
+
     draw()
     return
   }
@@ -996,10 +1008,19 @@ function onPointerMove(event) {
   draw()
 } // End onPointerMove
 //=================
-function onPointerUp() {
+function onPointerUp(event) {
   panning = false
   panStart = null
   panOriginal = null
+
+  if (
+    event?.currentTarget &&
+    typeof event.currentTarget.releasePointerCapture === 'function' &&
+    event.pointerId !== undefined &&
+    event.currentTarget.hasPointerCapture?.(event.pointerId)
+  ) {
+    event.currentTarget.releasePointerCapture(event.pointerId)
+  }
 
   if (app.state.currentTool !== 'move') {
     drawing.clearSnapPreview()
@@ -1048,13 +1069,15 @@ function onKeyDown(event) {
     return
   }
 
+  if (key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    exitToSelect()
+    return
+  }
+
   if (app.state.currentTool === 'panel') {
     if (app.state.currentView !== 'front') {
-      if (key === 'Escape') {
-        event.preventDefault()
-        exitToSelect()
-      }
-
       return
     }
 
@@ -1082,34 +1105,12 @@ function onKeyDown(event) {
       return
     }
 
-    if (key === 'Escape') {
-      event.preventDefault()
-      drawing.clearPanelInput()
-      drawing.setHover(null)
-      app.setStatus('Đã hủy nhập Vẽ Tấm')
-      draw()
-      return
-    }
-
     if (key === 'Enter') {
       event.preventDefault()
       drawing.addPanelFromHover()
       draw()
       return
     }
-  }
-
-  if (key === 'Escape') {
-    event.preventDefault()
-
-    if (app.state.currentTool === 'move') {
-      drawing.cancelCadMove()
-      draw()
-      return
-    }
-
-    exitToSelect()
-    return
   }
 
   if (key === 'm' || key === 'M') {
@@ -1152,28 +1153,26 @@ watch(() => app.state.currentTool, (tool) => {
   }
 
   drawing.resetMoveTool()
+  drawing.clearSnapPreview()
+  drawing.setHover(null)
+  box.clearSelection()
 
-  if (tool !== 'select') {
+  if (tool === 'select') {
+    app.setStatus('Select')
+    draw()
     return
   }
 
-  dimInput.value.active = false
-  dimInput.value.key = null
-  dimInput.value.boxId = null
-  dimInput.value.target = null
+  if (tool === 'box') {
+    app.setStatus('Box: chọn điểm góc đầu tiên')
+    draw()
+    return
+  }
 
-  boxHeightInput.value.active = false
-  boxHeightInput.value.value = ''
-
-  box.cancelDraft()
-  wall.clearEditingDim()
-  box.clearEditingDim()
-  drawing.clearPanelInput()
-  drawing.setHover(null)
-  drawing.clearSnapPreview()
-  hoverDim.value = null
-
-  draw()
+  if (tool === 'panel') {
+    app.setStatus('Vẽ Tấm: chọn cạnh Zone')
+    draw()
+  }
 })
 onMounted(() => {
   resizeCanvas()
@@ -1186,10 +1185,10 @@ onBeforeUnmount(() => {
 })
 </script>
 <style scoped>
-.mn-cursor-move {
-  cursor: move !important;
-}
 
+.mn-cursor-move {
+  cursor: none;
+}
 .mn-cursor-box {
   cursor: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 2 L4 22 L9 17 L13 27 L17 25 L13 15 L20 15 Z' fill='white' stroke='%23111111' stroke-width='1.4' stroke-linejoin='round'/%3E%3Crect x='13' y='21' width='14' height='8' rx='1.5' fill='%23dbefff' stroke='%230077CC' stroke-width='1.5'/%3E%3C/svg%3E") 4 2, crosshair;
 }

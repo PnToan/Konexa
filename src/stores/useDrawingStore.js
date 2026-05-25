@@ -560,18 +560,11 @@ const store = createSimpleStore({
       return null
     }
 
-    if (state.move.targetType === 'panel') {
-      state.selectedPanelId = state.move.targetId
-      boxStore.clearSelection()
-    }
-
-    if (state.move.targetType === 'box') {
-      state.selectedPanelId = null
-      boxStore.selectBox(state.move.targetId)
-    }
-
+    // Quan trọng:
+    // Không select panel / box ở click lần 1.
+    // Chỉ commit xong mới select object vừa move.
     state.snapPreview = null
-    useAppStore().setStatus('Move: đã chọn điểm gốc')
+    useAppStore().setStatus('Move: đã chọn điểm gốc, rê chuột để di chuyển')
 
     return {
       type: state.move.targetType,
@@ -593,7 +586,9 @@ const store = createSimpleStore({
       currentView
     )
 
-    state.snapPreview = state.move.targetSnap || null
+    // Không dùng snapPreview chung trong Move.
+    // Move đã có moveTargetSnap riêng để renderer vẽ.
+    state.snapPreview = null
 
     return state.move.previewTarget || null
   }, // End previewCadMove
@@ -640,14 +635,15 @@ const store = createSimpleStore({
     useAppStore().setStatus('Đã hủy Move')
   }, // End cancelCadMove
 
-   //=================
+  //=================
   getMovePreviewTarget() {
     if (!state.move.active) return null
     if (state.move.phase !== 'pick-target') return null
+    if (!state.move.previewTarget) return null
 
     return {
       type: state.move.targetType,
-      target: state.move.previewTarget || null
+      target: state.move.previewTarget
     }
   }, // End getMovePreviewTarget
 
@@ -667,6 +663,8 @@ const store = createSimpleStore({
   //=================
   getMoveTargetSnap() {
     if (!state.move) return null
+    if (!state.move.active) return null
+    if (state.move.phase !== 'pick-target') return null
 
     return state.move.targetSnap || null
   }, // End getMoveTargetSnap
