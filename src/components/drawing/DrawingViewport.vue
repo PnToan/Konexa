@@ -873,38 +873,26 @@ function onPointerDown(event) {
       return
     }
 
-    try {
-      if (drawing.isCadMovePickingTarget()) {
-        drawing.commitCadMove(
-          rawLocal,
-          app.state.viewport,
-          event.shiftKey,
-          app.state.currentView
-        )
-
-        draw()
-        return
-      }
-
-      drawing.startCadMoveFromHover(
+    if (drawing.isCadMovePickingTarget()) {
+      drawing.commitCadMove(
         rawLocal,
         app.state.viewport,
+        event.shiftKey,
         app.state.currentView
       )
 
       draw()
       return
-    } catch (error) {
-      console.error('Move pointer down error:', error)
-
-      drawing.resetMoveTool()
-      drawing.clearSnapPreview()
-      drawing.setHover(null)
-      hoverDim.value = null
-      app.setStatus('Move bị lỗi, đã hủy lệnh')
-      draw()
-      return
     }
+
+    drawing.startCadMoveFromHover(
+      rawLocal,
+      app.state.viewport,
+      app.state.currentView
+    )
+
+    draw()
+    return
   }
 
   if (app.state.currentTool === 'panel') {
@@ -994,37 +982,25 @@ function onPointerMove(event) {
   hoverDim.value = app.state.currentTool === 'move' ? null : boxDimHit || wallDimHit
 
   if (app.state.currentTool === 'move') {
-    try {
-      if (drawing.isCadMovePickingTarget()) {
-        drawing.previewCadMove(
-          rawLocal,
-          app.state.viewport,
-          event.shiftKey,
-          app.state.currentView
-        )
-      } else {
-        drawing.updateMoveToolHover(
-          rawLocal,
-          app.state.viewport,
-          app.state.currentView
-        )
-      }
-
-      drawing.setHover(null)
-      hoverDim.value = null
-      draw()
-      return
-    } catch (error) {
-      console.error('Move pointer move error:', error)
-
-      drawing.resetMoveTool()
-      drawing.clearSnapPreview()
-      drawing.setHover(null)
-      hoverDim.value = null
-      app.setStatus('Move bị lỗi, đã hủy lệnh')
-      draw()
-      return
+    if (drawing.isCadMovePickingTarget()) {
+      drawing.previewCadMove(
+        rawLocal,
+        app.state.viewport,
+        event.shiftKey,
+        app.state.currentView
+      )
+    } else {
+      drawing.updateMoveToolHover(
+        rawLocal,
+        app.state.viewport,
+        app.state.currentView
+      )
     }
+
+    drawing.setHover(null)
+    hoverDim.value = null
+    draw()
+    return
   }
 
   drawing.clearSnapPreview()

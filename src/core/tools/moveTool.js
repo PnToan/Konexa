@@ -178,6 +178,58 @@ function getRectMiddleSnapPoints(rect, meta = {}) {
 } // End getRectMiddleSnapPoints
 
 //=================
+function getRectSnapEdges(rect, meta = {}) {
+  if (!rect) return []
+
+  const left = rect.x
+  const right = rect.x + rect.width
+  const bottom = rect.y
+  const top = rect.y + rect.height
+
+  return [
+    {
+      type: 'edge',
+      key: 'bottom',
+      orientation: 'horizontal',
+      x1: left,
+      y1: bottom,
+      x2: right,
+      y2: bottom
+    },
+    {
+      type: 'edge',
+      key: 'top',
+      orientation: 'horizontal',
+      x1: left,
+      y1: top,
+      x2: right,
+      y2: top
+    },
+    {
+      type: 'edge',
+      key: 'left',
+      orientation: 'vertical',
+      x1: left,
+      y1: bottom,
+      x2: left,
+      y2: top
+    },
+    {
+      type: 'edge',
+      key: 'right',
+      orientation: 'vertical',
+      x1: right,
+      y1: bottom,
+      x2: right,
+      y2: top
+    }
+  ].map((edge) => ({
+    ...edge,
+    ...meta
+  }))
+} // End getRectSnapEdges
+
+//=================
 function getMoveTargetSnapPoints(targetType, target, currentView) {
   const rect = getMoveTargetRect(targetType, target, currentView)
 
@@ -418,6 +470,10 @@ function collectTargetSnapSources(panels = [], boxes = [], movingType, movingId,
 function findNearestPointSnap(localPoint, targets, tolerance) {
   let best = null
 
+  if (!localPoint || !targets || !Array.isArray(targets.points)) {
+    return null
+  }
+
   targets.points.forEach((target) => {
     const distance = distanceBetweenPoints(localPoint, target)
 
@@ -438,12 +494,16 @@ function findNearestPointSnap(localPoint, targets, tolerance) {
 function findNearestEdgeSnap(localPoint, targets, tolerance) {
   let best = null
 
+  if (!localPoint || !targets || !Array.isArray(targets.edges)) {
+    return null
+  }
+
   targets.edges.forEach((edge) => {
     let snapPoint = null
 
     if (edge.orientation === 'horizontal') {
       snapPoint = {
-        x: clamp(localPoint.x, edge.x1, edge.x2),
+        x: clamp(toNumber(localPoint.x), edge.x1, edge.x2),
         y: edge.y1
       }
     }
@@ -451,7 +511,7 @@ function findNearestEdgeSnap(localPoint, targets, tolerance) {
     if (edge.orientation === 'vertical') {
       snapPoint = {
         x: edge.x1,
-        y: clamp(localPoint.y, edge.y1, edge.y2)
+        y: clamp(toNumber(localPoint.y), edge.y1, edge.y2)
       }
     }
 
@@ -479,6 +539,13 @@ function findNearestEdgeSnap(localPoint, targets, tolerance) {
 
 //=================
 function resolveMoveTargetPoint(moveState, panels = [], boxes = [], localPoint, viewport, currentView = 'front') {
+  if (!localPoint) {
+    return {
+      point: moveState.targetPoint || moveState.basePoint || { x: 0, y: 0 },
+      snap: null
+    }
+  }
+
   const tolerance = getMoveTolerance(viewport)
   const targets = collectTargetSnapSources(
     panels,
@@ -567,7 +634,7 @@ function applyPanelAxisDelta(panel, axis, delta) {
   }
 
   if (axis === 'y') {
-    const sourceY = toNumber(panel.y3d ?? panel.worldY ?? panel.depthY ?? panel.y3d, 0)
+    const sourceY = toNumber(panel.y3d ?? panel.worldY ?? panel.depthY, 0)
     const nextY = sourceY + delta
 
     next.y3d = nextY
