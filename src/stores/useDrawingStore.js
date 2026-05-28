@@ -25,6 +25,7 @@ const store = createSimpleStore({
   hover: null,
   snapPreview: null,
   selectedPanelId: null,
+  selectedPanelIds: [],
   panelInputBuffer: '',
   move: createMoveState()
 }, (state) => ({
@@ -341,11 +342,31 @@ const store = createSimpleStore({
   //=================
   selectPanel(panelId) {
     state.selectedPanelId = panelId
+    state.selectedPanelIds = panelId ? [panelId] : []
   }, // End selectPanel
+
+  //=================
+  selectPanels(panelIds) {
+    const ids = Array.isArray(panelIds) ? panelIds.filter(Boolean) : []
+
+    state.selectedPanelIds = ids
+    state.selectedPanelId = ids[0] || null
+  }, // End selectPanels
+  //=================
+  deleteSelectedPanels() {
+    const selectedIds = Array.isArray(state.selectedPanelIds) ? state.selectedPanelIds : []
+
+    if (!selectedIds.length) return
+
+    state.panels = state.panels.filter((panel) => !selectedIds.includes(panel.id))
+    state.selectedPanelId = null
+    state.selectedPanelIds = []
+  }, // End deleteSelectedPanels
 
   //=================
   clearSelection() {
     state.selectedPanelId = null
+    state.selectedPanelIds = []
   }, // End clearSelection
 
   //=================

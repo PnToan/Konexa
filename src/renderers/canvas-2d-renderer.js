@@ -330,13 +330,15 @@ function getPanelRect(panel, currentView = 'front') {
 } // End getPanelRect
 
 //=================
-function drawPanels(ctx, viewport, panels = [], selectedPanelId, currentView = 'front') {
+function drawPanels(ctx, viewport, panels = [], selectedPanelIds = [], currentView = 'front') {
+  const selectedIds = Array.isArray(selectedPanelIds) ? selectedPanelIds : []
+
   panels.forEach((panel) => {
     const rect = getPanelRect(panel, currentView)
 
     if (!rect) return
 
-    const selected = panel.id === selectedPanelId
+    const selected = selectedIds.includes(panel.id)
 
     drawRectLocal(ctx, viewport, rect, {
       fill: 'rgba(0, 64, 160, 0.90)',
@@ -758,15 +760,19 @@ function drawBoxDims(ctx, viewport, box, editingDim, currentView = 'top') {
 } // End drawBoxDims
 
 //=================
-function drawBoxes(ctx, viewport, boxes = [], selectedBoxId, editingDim, currentView = 'top') {
+function drawBoxes(ctx, viewport, boxes = [], selectedBoxIds = [], editingDim, currentView = 'top') {
+  const selectedIds = Array.isArray(selectedBoxIds) ? selectedBoxIds : []
+
   boxes.forEach((box) => {
     const boxRect = projectBoxToCameraRect(box, currentView)
+    const selected = selectedIds.includes(box.id)
 
     drawRectLocal(ctx, viewport, boxRect, {
       fill: box.color || 'rgba(0, 119, 204, 0.12)',
-      stroke: '#0077CC',
-      lineWidth: selectedBoxId === box.id ? 3 : 2
+      stroke: selected ? '#ff9f1a' : '#0077CC',
+      lineWidth: selected ? 3 : 2
     })
+
     drawBoxDims(ctx, viewport, box, editingDim, currentView)
   })
 } // End drawBoxes
@@ -868,7 +874,32 @@ export function getWallDimHit(viewport, wallRect, screenX, screenY) {
 export function getBoxDimHit(viewport, boxes, screenX, screenY, currentView = 'top') {
   return hitTestBoxDim(viewport, boxes, screenX, screenY, currentView)
 } // End getBoxDimHit
+//=================
+function drawSelectDragBox(ctx, selectDrag) {
+  if (!selectDrag || !selectDrag.active || !selectDrag.start || !selectDrag.current) return
+  if (!selectDrag.moved) return
 
+  const x = Math.min(selectDrag.start.x, selectDrag.current.x)
+  const y = Math.min(selectDrag.start.y, selectDrag.current.y)
+  const width = Math.abs(selectDrag.current.x - selectDrag.start.x)
+  const height = Math.abs(selectDrag.current.y - selectDrag.start.y)
+  const isTouchMode = selectDrag.mode === 'touch'
+
+  ctx.save()
+  ctx.fillStyle = isTouchMode ? 'rgba(0, 160, 255, 0.08)' : 'rgba(0, 120, 255, 0.10)'
+  ctx.strokeStyle = '#0078ff'
+  ctx.lineWidth = 1
+
+  if (isTouchMode) {
+    ctx.setLineDash([6, 4])
+  } else {
+    ctx.setLineDash([])
+  }
+
+  ctx.fillRect(x, y, width, height)
+  ctx.strokeRect(x, y, width, height)
+  ctx.restore()
+} // End drawSelectDragBox
 //=================
 export function renderCanvas2D(ctx, payload) {
   const {
@@ -893,7 +924,10 @@ export function renderCanvas2D(ctx, payload) {
     hover,
     snapPreview,
     selectedPanelId,
+    selectedPanelIds,
     selectedBoxId,
+    selectedBoxIds,
+    selectDrag,
     showGrid
   } = payload
 
@@ -909,10 +943,11 @@ export function renderCanvas2D(ctx, payload) {
     drawWallDims(ctx, viewport, wallRect, wallEditingDim)
   }
 
-  drawBoxes(ctx, viewport, boxes, selectedBoxId, boxEditingDim, currentView)
+  drawBoxes(ctx, viewport, boxes, selectedBoxIds || (selectedBoxId ? [selectedBoxId] : []), boxEditingDim, currentView)
   drawBoxDraft(ctx, viewport, boxDraftRect, currentView)
   drawZoneOverlay(ctx, viewport, zones, hover)
-  drawPanels(ctx, viewport, panels, selectedPanelId, currentView)
+  drawPanels(ctx, viewport, panels, selectedPanelIds || (selectedPanelId ? [selectedPanelId] : []), currentView)
+  drawSelectDragBox(ctx, selectDrag)
   drawMovePreviewTarget(ctx, viewport, movePreviewTarget, currentView)
   drawMoveHoverSnapPoints(ctx, viewport, moveHoverSnapPoints)
   drawMoveTargetSnap(ctx, viewport, moveTargetSnap)

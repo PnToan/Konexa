@@ -95,6 +95,14 @@ let panning = false
 let panStart = null
 let panOriginal = null
 
+const selectDrag = ref({
+  active: false,
+  start: null,
+  current: null,
+  moved: false,
+  mode: 'contain'
+})
+
 const views = [
   { id: 'front', label: 'Trước' }, { id: 'back', label: 'Sau' }, { id: 'left', label: 'Trái' },
   { id: 'right', label: 'Phải' }, { id: 'top', label: 'Trên' }, { id: 'bottom', label: 'Dưới' }
@@ -178,7 +186,10 @@ function draw() {
     hover: drawing.state.hover,
     snapPreview: drawing.state.snapPreview,
     selectedPanelId: drawing.state.selectedPanelId,
+    selectedPanelIds: drawing.state.selectedPanelIds,
     selectedBoxId: box.state.selectedBoxId,
+    selectedBoxIds: box.state.selectedBoxIds,
+    selectDrag: selectDrag.value,
     showGrid: app.state.showGrid
   })
 } // End draw
@@ -461,6 +472,208 @@ function zoomAtPoint(screenX, screenY, nextZoom) {
 
   app.setPan(nextPanX, nextPanY)
 } // End zoomAtPoint
+//=================
+function getScreenPointFromEvent(event) {
+  const rect = canvasRef.value.getBoundingClientRect()
+
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  }
+} // End getScreenPointFromEvent
+
+//=================
+function startSelectDrag(event) {
+  if (app.state.currentTool !== 'select') return false
+  if (event.button !== 0) return false
+  if (event.shiftKey) return false
+
+  const point = getScreenPointFromEvent(event)
+
+  selectDrag.value = {
+    active: false,
+    start: point,
+    current: point,
+    moved: false,
+    mode: 'contain'
+  }
+
+  return true
+} // End startSelectDrag
+//=================
+function resetSelectDrag() {
+  selectDrag.value = {
+    active: false,
+    start: null,
+    current: null,
+    moved: false,
+    mode: 'contain'
+  }
+
+  draw()
+} // End resetSelectDrag
+//=================
+function getSelectDragRect() {
+  if (!selectDrag.value.start || !selectDrag.value.current) return null
+
+  const start = selectDrag.value.start
+  const current = selectDrag.value.current
+
+  return {
+    x: Math.min(start.x, current.x),
+    y: Math.min(start.y, current.y),
+    width: Math.abs(current.x - start.x),
+    height: Math.abs(current.y - start.y),
+    mode: selectDrag.value.mode
+  }
+} // End getSelectDragRect
+//=================
+function localRectToScreenRect(rect) {
+  if (!rect) return null
+
+  const viewport = app.state.viewport
+  const p1 = localToScreen(viewport, rect.x, rect.y)
+  const p2 = localToScreen(viewport, rect.x + rect.width, rect.y + rect.height)
+
+  return {
+    x: Math.min(p1.x, p2.x),
+    y: Math.min(p1.y, p2.y),
+    width: Math.abs(p2.x - p1.x),
+    height: Math.abs(p2.y - p1.y)
+  }
+} // End localRectToScreenRect
+//=================
+function getRectRight(rect) {
+  return rect.x + rect.width
+} // End getRectRight
+
+//=================
+function getRectBottom(rect) {
+  return rect.y + rect.height
+} // End getRectBottom
+
+//=================
+function rectContainsRect(outer, inner) {
+  return (
+    inner.x >= outer.x &&
+    getRectRight(inner) <= getRectRight(outer) &&
+    inner.y >= outer.y &&
+    getRectBottom(inner) <= getRectBottom(outer)
+  )
+} // End rectContainsRect
+
+//=================
+function rectTouchesRect(a, b) {
+  return !(
+    getRectRight(a) < b.x ||
+    getRectRight(b) < a.x ||
+    getRectBottom(a) < b.y ||
+    getRectBottom(b) < a.y
+  )
+} // End rectTouchesRect
+//=================
+function getPanelSelectRect(panel) {
+  if (!panel) return null
+
+  const view = app.getViewConfig(app.state.currentView)
+  const axisU = String(view.axisA || 'X').toLowerCase()
+  const axisV = String(view.axisB || 'Z').toLowerCase()
+
+  const getAxisMin = (target, axis) => {
+    if (axis === 'x') return Number(target.x || 0)
+    if (axis === 'y') return Number((target.y3d ?? target.worldY ?? target.depthY ?? target.y) || 0)
+    if (axis === 'z') return Number(target.z ?? target.y ?? 0)
+
+    return 0
+  }
+
+  const getAxisSize = (target, axis) => {
+    if (axis === 'x') return Number(target.xSize ?? target.width ?? 0)
+    if (axis === 'y') return Number(target.ySize ?? target.depth ?? 0)
+    if (axis === 'z') return Number(target.zSize ?? target.height ?? target.thickness ?? 0)
+
+    return 0
+  }
+
+  const projectAxisValue = (value, size, reverse) => {
+    if (reverse) return -(value + size)
+
+    return value
+  }
+
+  const uMin = getAxisMin(panel, axisU)
+  const vMin = getAxisMin(panel, axisV)
+  const uSize = getAxisSize(panel, axisU)
+  const vSize = getAxisSize(panel, axisV)
+
+  if (uSize <= 0 || vSize <= 0) return null
+
+  return localRectToScreenRect({
+    x: projectAxisValue(uMin, uSize, view.reverseHorizontal),
+    y: projectAxisValue(vMin, vSize, view.reverseVertical),
+    width: uSize,
+    height: vSize
+  })
+} // End getPanelSelectRect
+//=================
+function getBoxSelectRect(targetBox) {
+  if (!targetBox) return null
+
+  const rect = projectBoxToCameraRect(targetBox, app.state.currentView)
+
+  if (!rect) return null
+
+  return localRectToScreenRect(rect)
+} // End getBoxSelectRect
+//=================
+function getSelectedIdsByDragRect(selectRect) {
+  if (!selectRect) {
+    return {
+      panelIds: [],
+      boxIds: []
+    }
+  }
+
+  const checkRect = selectRect.mode === 'touch'
+    ? rectTouchesRect
+    : rectContainsRect
+
+  const panelIds = drawing.state.panels
+    .filter((panel) => {
+      const rect = getPanelSelectRect(panel)
+
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false
+
+      return checkRect(selectRect, rect)
+    })
+    .map((panel) => panel.id)
+
+  const boxIds = box.state.boxes
+    .filter((targetBox) => {
+      const rect = getBoxSelectRect(targetBox)
+
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false
+
+      return checkRect(selectRect, rect)
+    })
+    .map((targetBox) => targetBox.id)
+
+  return {
+    panelIds,
+    boxIds
+  }
+} // End getSelectedIdsByDragRect
+//=================
+function mergeIds(oldIds, newId) {
+  const ids = Array.isArray(oldIds) ? oldIds.slice() : []
+
+  if (!newId) return ids
+  if (ids.includes(newId)) return ids
+
+  ids.push(newId)
+
+  return ids
+} // End mergeIds
 //=================
 function updateHover(local) {
   const scale = app.state.viewport.localScale * app.state.viewport.zoom
@@ -761,7 +974,7 @@ function commitDimInput() {
   }
 
   if (dimInput.value.target === 'wall') {
-    wall.setWallSize(dimInput.value.key, numberValue)
+    wall.setSize(dimInput.value.key, numberValue)
     drawing.rebuildZones()
   }
 
@@ -861,13 +1074,17 @@ function onPointerDown(event) {
     return
   }
 
-  if (event.button === 1 || event.button === 2 || (event.shiftKey && app.state.currentTool !== 'move')) {
+  if (
+    event.button === 1 ||
+    event.button === 2 ||
+    (event.shiftKey && app.state.currentTool !== 'move' && app.state.currentTool !== 'select')
+  ) {
     panning = true
     panStart = { x: event.clientX, y: event.clientY }
     panOriginal = { x: app.state.viewport.panX, y: app.state.viewport.panY }
     return
   }
-
+  startSelectDrag(event)
   if (app.state.currentTool === 'move') {
     event.preventDefault()
     event.stopPropagation()
@@ -921,12 +1138,18 @@ function onPointerDown(event) {
   const panelHit = hitTestPanel(drawing.state.panels, rawLocal)
 
   if (app.state.currentTool === 'select' && panelHit) {
-    drawing.selectPanel(panelHit.panel.id)
+    if (event.shiftKey) {
+      drawing.selectPanels(mergeIds(drawing.state.selectedPanelIds, panelHit.panel.id))
+    } else {
+      drawing.selectPanel(panelHit.panel.id)
+      box.clearSelection()
+    }
+
     draw()
     return
   }
 
-  if (app.state.currentTool === 'select') {
+  if (app.state.currentTool === 'select' && !event.shiftKey) {
     drawing.clearSelection()
     box.clearSelection()
   }
@@ -936,7 +1159,24 @@ function onPointerDown(event) {
 //=================
 function onPointerMove(event) {
   const rawLocal = localFromEvent(event)
+  if (app.state.currentTool === 'select' && selectDrag.value.start && event.buttons === 1) {
+    const point = getScreenPointFromEvent(event)
+    const dx = point.x - selectDrag.value.start.x
+    const dy = point.y - selectDrag.value.start.y
+    const moved = Math.sqrt(dx * dx + dy * dy) > 4
 
+    selectDrag.value.current = point
+    selectDrag.value.moved = moved
+    selectDrag.value.active = moved
+    selectDrag.value.mode = point.x >= selectDrag.value.start.x ? 'contain' : 'touch'
+
+    if (moved) {
+      event.preventDefault()
+      event.stopPropagation()
+      draw()
+      return
+    }
+  }
   if (panning && panStart && panOriginal) {
     app.setPan(
       panOriginal.x + event.clientX - panStart.x,
@@ -1013,6 +1253,23 @@ function onPointerMove(event) {
 } // End onPointerMove
 //=================
 function onPointerUp(event) {
+  if (selectDrag.value.active) {
+    const selectRect = getSelectDragRect()
+    const selectedIds = getSelectedIdsByDragRect(selectRect)
+
+    drawing.selectPanels(selectedIds.panelIds)
+    box.selectBoxes(selectedIds.boxIds)
+
+    resetSelectDrag()
+
+    event.preventDefault()
+    event.stopPropagation()
+    return
+  }
+
+  if (selectDrag.value.start) {
+    resetSelectDrag()
+  }
   panning = false
   panStart = null
   panOriginal = null
@@ -1058,7 +1315,29 @@ function onWheel(event) {
   draw()
 } // End onWheel
 //=================
+function deleteCurrentSelection() {
+  const hasPanels = Array.isArray(drawing.state.selectedPanelIds) && drawing.state.selectedPanelIds.length > 0
+  const hasBoxes = Array.isArray(box.state.selectedBoxIds) && box.state.selectedBoxIds.length > 0
+
+  if (!hasPanels && !hasBoxes) return false
+
+  drawing.deleteSelectedPanels()
+  box.deleteSelectedBoxes()
+  drawing.rebuildZones()
+  draw()
+
+  return true
+} // End deleteCurrentSelection
+//=================
 function onKeyDown(event) {
+    if (event.key === 'Delete') {
+    if (deleteCurrentSelection()) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    return
+  }
   const key = event.key
   const isSpace = key === ' ' || key === 'Spacebar' || event.code === 'Space'
 

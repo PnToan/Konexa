@@ -43,6 +43,7 @@ function createBoxFromRect(rect, height) {
 const store = createSimpleStore({
   boxes: [],
   selectedBoxId: null,
+  selectedBoxIds: [],
   hoverDim: null,
   editingDim: null,
   draft: {
@@ -83,6 +84,7 @@ const store = createSimpleStore({
 
     state.boxes.push(box)
     state.selectedBoxId = box.id
+    state.selectedBoxIds = [box.id]
 
     return box
   }, // End commitDraft
@@ -95,11 +97,31 @@ const store = createSimpleStore({
   //=================
   selectBox(boxId) {
     state.selectedBoxId = boxId
+    state.selectedBoxIds = boxId ? [boxId] : []
   }, // End selectBox
+
+  //=================
+  selectBoxes(boxIds) {
+    const ids = Array.isArray(boxIds) ? boxIds.filter(Boolean) : []
+
+    state.selectedBoxIds = ids
+    state.selectedBoxId = ids[0] || null
+  }, // End selectBoxes
+  //=================
+  deleteSelectedBoxes() {
+    const selectedIds = Array.isArray(state.selectedBoxIds) ? state.selectedBoxIds : []
+
+    if (!selectedIds.length) return
+
+    state.boxes = state.boxes.filter((targetBox) => !selectedIds.includes(targetBox.id))
+    state.selectedBoxId = null
+    state.selectedBoxIds = []
+  }, // End deleteSelectedBoxes
 
   //=================
   clearSelection() {
     state.selectedBoxId = null
+    state.selectedBoxIds = []
   }, // End clearSelection
 
   //=================
