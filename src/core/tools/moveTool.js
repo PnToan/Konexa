@@ -72,6 +72,109 @@ function createMoveCopyTarget(targetType, previewTarget, panels = [], boxes = []
 } // End createMoveCopyTarget
 
 //=================
+function normalizeIds(ids) {
+  return Array.isArray(ids) ? ids.filter(Boolean) : []
+} // End normalizeIds
+
+//=================
+function getUnionRect(rects = []) {
+  const validRects = rects.filter((rect) => {
+    return rect
+      && Number.isFinite(rect.x)
+      && Number.isFinite(rect.y)
+      && Number.isFinite(rect.width)
+      && Number.isFinite(rect.height)
+      && rect.width > 0
+      && rect.height > 0
+  })
+
+  if (!validRects.length) return null
+
+  const left = Math.min(...validRects.map((rect) => rect.x))
+  const bottom = Math.min(...validRects.map((rect) => rect.y))
+  const right = Math.max(...validRects.map((rect) => rect.x + rect.width))
+  const top = Math.max(...validRects.map((rect) => rect.y + rect.height))
+
+  return {
+    x: left,
+    y: bottom,
+    width: right - left,
+    height: top - bottom
+  }
+} // End getUnionRect
+
+//=================
+function getPanelContainerBox(panel, boxes = []) {
+  if (!panel) return null
+
+  const boxId = panel.linkedFrameId || panel.frameId || panel.sourceBoxId || panel.baseObjectId
+
+  if (!boxId) return null
+
+  return (boxes || []).find((box) => box?.id === boxId) || null
+} // End getPanelContainerBox
+
+//=================
+function getPanelsInsideBoxes(panels = [], boxIds = []) {
+  const ids = new Set(normalizeIds(boxIds))
+
+  if (!ids.size) return []
+
+  return (panels || []).filter((panel) => {
+    const boxId = panel?.linkedFrameId || panel?.frameId || panel?.sourceBoxId || panel?.baseObjectId
+
+    return ids.has(boxId)
+  })
+} // End getPanelsInsideBoxes
+
+//=================
+function clampDeltaByRect(dx, dy, itemRect, containerRect) {
+  if (!itemRect || !containerRect) {
+    return { dx, dy }
+  }
+
+  const minDx = containerRect.x - itemRect.x
+  const maxDx = (containerRect.x + containerRect.width) - (itemRect.x + itemRect.width)
+  const minDy = containerRect.y - itemRect.y
+  const maxDy = (containerRect.y + containerRect.height) - (itemRect.y + itemRect.height)
+
+  return {
+    dx: minDx <= maxDx ? clamp(dx, minDx, maxDx) : dx,
+    dy: minDy <= maxDy ? clamp(dy, minDy, maxDy) : dy
+  }
+} // End clampDeltaByRect
+
+//=================
+function clampPanelDeltaInsideBox(panel, boxes = [], dx, dy, currentView = 'front') {
+  const box = getPanelContainerBox(panel, boxes)
+
+  if (!box) return { dx, dy }
+
+  const panelRect = getPanelViewRect(panel, currentView)
+  const boxRect = getBoxViewRect(box, currentView)
+
+  return clampDeltaByRect(dx, dy, panelRect, boxRect)
+} // End clampPanelDeltaInsideBox
+
+//=================
+function clampPanelsDeltaInsideBoxes(panelsToMove = [], boxes = [], dx, dy, currentView = 'front') {
+  let nextDx = dx
+  let nextDy = dy
+
+  ;(panelsToMove || []).forEach((panel) => {
+    const clamped = clampPanelDeltaInsideBox(panel, boxes, nextDx, nextDy, currentView)
+
+    nextDx = clamped.dx
+    nextDy = clamped.dy
+  })
+
+  return {
+    dx: nextDx,
+    dy: nextDy
+  }
+} // End clampPanelsDeltaInsideBoxes
+
+//=================
 export function createMoveState() {
   return {
     active: false,
@@ -79,13 +182,19 @@ export function createMoveState() {
 
     targetType: null,
     targetId: null,
+    targetIds: {
+      panelIds: [],
+      boxIds: []
+    },
 
     baseSnap: null,
     basePoint: null,
     targetPoint: null,
 
     originalTarget: null,
+    originalTargets: null,
     previewTarget: null,
+    previewTargets: null,
 
     hoverTargetType: null,
     hoverTargetId: null,
@@ -166,6 +275,7 @@ function getBoxViewRect(box, currentView = 'top') {
 function getMoveTargetRect(targetType, target, currentView) {
   if (targetType === 'panel') return getPanelViewRect(target, currentView)
   if (targetType === 'box') return getBoxViewRect(target, currentView)
+  if (targetType === 'selection') return target?.rect || null
 
   return null
 } // End getMoveTargetRect
@@ -179,6 +289,19 @@ function pointInRect(rect, point) {
     && point.y >= rect.y
     && point.y <= rect.y + rect.height
 } // End pointInRect
+
+
+//=================
+function pointNearRect(rect, point, tolerance = 0) {
+  if (!rect || !point) return false
+
+  const safeTolerance = Math.max(0, toNumber(tolerance, 0))
+
+  return point.x >= rect.x - safeTolerance
+    && point.x <= rect.x + rect.width + safeTolerance
+    && point.y >= rect.y - safeTolerance
+    && point.y <= rect.y + rect.height + safeTolerance
+} // End pointNearRect
 
 //=================
 function getRectCornerSnapPoints(rect, meta = {}) {
@@ -289,6 +412,74 @@ function getMoveTargetSnapPoints(targetType, target, currentView) {
 } // End getMoveTargetSnapPoints
 
 //=================
+function createSelectionMoveTarget(panels = [], boxes = [], selectedPanelIds = [], selectedBoxIds = [], currentView = 'front') {
+  const panelIds = normalizeIds(selectedPanelIds)
+  const boxIds = normalizeIds(selectedBoxIds)
+  const selectedBoxes = boxes.filter((box) => boxIds.includes(box.id))
+  const linkedPanels = getPanelsInsideBoxes(panels, boxIds)
+  const selectedPanelIdSet = new Set([
+    ...panelIds,
+    ...linkedPanels.map((panel) => panel.id)
+  ])
+  const selectedPanels = panels.filter((panel) => selectedPanelIdSet.has(panel.id))
+  const itemRects = []
+
+  selectedPanels.forEach((panel) => {
+    const rect = getPanelViewRect(panel, currentView)
+
+    if (!rect) return
+
+    itemRects.push({
+      type: 'panel',
+      id: panel.id,
+      rect
+    })
+  })
+
+  selectedBoxes.forEach((box) => {
+    const rect = getBoxViewRect(box, currentView)
+
+    if (!rect) return
+
+    itemRects.push({
+      type: 'box',
+      id: box.id,
+      rect
+    })
+  })
+
+  if (itemRects.length <= 1) return null
+
+  const rect = getUnionRect(itemRects.map((item) => item.rect))
+
+  if (!rect) return null
+
+  return {
+    id: 'selection_group',
+    name: 'Selection Group',
+    panelIds: selectedPanels.map((panel) => panel.id),
+    boxIds: selectedBoxes.map((box) => box.id),
+    panels: selectedPanels.map((panel) => ({ ...panel })),
+    boxes: selectedBoxes.map((box) => ({ ...box })),
+    itemRects,
+    rect
+  }
+} // End createSelectionMoveTarget
+
+//=================
+function createSelectionPreviewTarget(targets, currentView = 'front') {
+  if (!targets) return null
+
+  return createSelectionMoveTarget(
+    targets.panels || [],
+    targets.boxes || [],
+    (targets.panels || []).map((panel) => panel.id),
+    (targets.boxes || []).map((box) => box.id),
+    currentView
+  )
+} // End createSelectionPreviewTarget
+
+//=================
 function getNearestSnapPoint(snapPoints, localPoint, tolerance) {
   let best = null
 
@@ -308,14 +499,91 @@ function getNearestSnapPoint(snapPoints, localPoint, tolerance) {
 } // End getNearestSnapPoint
 
 //=================
-function collectHoverSnapCandidates(panels = [], boxes = [], localPoint, currentView) {
+function collectSelectedHoverSnapCandidates(panels = [], boxes = [], localPoint, currentView, selectedPanelIds = [], selectedBoxIds = [], tolerance = 0) {
   const candidates = []
+  const selectionTarget = createSelectionMoveTarget(
+    panels,
+    boxes,
+    selectedPanelIds,
+    selectedBoxIds,
+    currentView
+  )
+
+  if (selectionTarget) {
+    if (!pointNearRect(selectionTarget.rect, localPoint, tolerance)) return candidates
+
+    candidates.push({
+      targetType: 'selection',
+      target: selectionTarget,
+      rect: selectionTarget.rect,
+      snapPoints: getMoveTargetSnapPoints('selection', selectionTarget, currentView)
+    })
+
+    return candidates
+  }
+
+  const panelIds = new Set(normalizeIds(selectedPanelIds))
+  const boxIds = new Set(normalizeIds(selectedBoxIds))
+
+  panels.forEach((panel) => {
+    if (!panelIds.has(panel?.id)) return
+
+    const rect = getPanelViewRect(panel, currentView)
+
+    if (!rect) return
+    if (!pointNearRect(rect, localPoint, tolerance)) return
+
+    candidates.push({
+      targetType: 'panel',
+      target: panel,
+      rect,
+      snapPoints: getMoveTargetSnapPoints('panel', panel, currentView)
+    })
+  })
+
+  boxes.forEach((box) => {
+    if (!boxIds.has(box?.id)) return
+
+    const rect = getBoxViewRect(box, currentView)
+
+    if (!rect) return
+    if (!pointNearRect(rect, localPoint, tolerance)) return
+
+    candidates.push({
+      targetType: 'box',
+      target: box,
+      rect,
+      snapPoints: getMoveTargetSnapPoints('box', box, currentView)
+    })
+  })
+
+  return candidates
+} // End collectSelectedHoverSnapCandidates
+
+//=================
+function collectHoverSnapCandidates(panels = [], boxes = [], localPoint, currentView, selectedPanelIds = [], selectedBoxIds = [], tolerance = 0) {
+  const candidates = []
+  const panelIds = normalizeIds(selectedPanelIds)
+  const boxIds = normalizeIds(selectedBoxIds)
+  const hasSelection = panelIds.length > 0 || boxIds.length > 0
+
+  if (hasSelection) {
+    return collectSelectedHoverSnapCandidates(
+      panels,
+      boxes,
+      localPoint,
+      currentView,
+      panelIds,
+      boxIds,
+      tolerance
+    )
+  }
 
   panels.forEach((panel) => {
     const rect = getPanelViewRect(panel, currentView)
 
     if (!rect) return
-    if (!pointInRect(rect, localPoint)) return
+    if (!pointNearRect(rect, localPoint, tolerance)) return
 
     candidates.push({
       targetType: 'panel',
@@ -329,7 +597,7 @@ function collectHoverSnapCandidates(panels = [], boxes = [], localPoint, current
     const rect = getBoxViewRect(box, currentView)
 
     if (!rect) return
-    if (!pointInRect(rect, localPoint)) return
+    if (!pointNearRect(rect, localPoint, tolerance)) return
 
     candidates.push({
       targetType: 'box',
@@ -343,26 +611,24 @@ function collectHoverSnapCandidates(panels = [], boxes = [], localPoint, current
 } // End collectHoverSnapCandidates
 
 //=================
-export function getMoveHoverResult(panels = [], boxes = [], localPoint, viewport, currentView = 'front') {
+export function getMoveHoverResult(panels = [], boxes = [], localPoint, viewport, currentView = 'front', selectedPanelIds = [], selectedBoxIds = []) {
   const tolerance = getMoveTolerance(viewport)
-  const candidates = collectHoverSnapCandidates(panels, boxes, localPoint, currentView)
+  const candidates = collectHoverSnapCandidates(
+    panels,
+    boxes,
+    localPoint,
+    currentView,
+    selectedPanelIds,
+    selectedBoxIds,
+    tolerance
+  )
 
   let best = null
 
   candidates.forEach((candidate) => {
     const snap = getNearestSnapPoint(candidate.snapPoints, localPoint, tolerance)
 
-    if (!snap) {
-      if (!best) {
-        best = {
-          ...candidate,
-          snap: null,
-          distance: Infinity
-        }
-      }
-
-      return
-    }
+    if (!snap) return
 
     if (best?.snap && snap.distance >= best.snap.distance) return
 
@@ -391,13 +657,15 @@ export function getMoveHoverResult(panels = [], boxes = [], localPoint, viewport
 } // End getMoveHoverResult
 
 //=================
-export function updateMoveHover(moveState, panels = [], boxes = [], localPoint, viewport, currentView = 'front') {
+export function updateMoveHover(moveState, panels = [], boxes = [], localPoint, viewport, currentView = 'front', selectedPanelIds = [], selectedBoxIds = []) {
   const hover = getMoveHoverResult(
     panels,
     boxes,
     localPoint,
     viewport,
-    currentView
+    currentView,
+    selectedPanelIds,
+    selectedBoxIds
   )
 
   const hoverSnapPoints = (hover.snapPoints || []).map((snapPoint) => ({
@@ -416,14 +684,16 @@ export function updateMoveHover(moveState, panels = [], boxes = [], localPoint, 
 } // End updateMoveHover
 
 //=================
-export function startMoveFromHover(moveState, panels = [], boxes = [], localPoint, viewport, currentView = 'front') {
+export function startMoveFromHover(moveState, panels = [], boxes = [], localPoint, viewport, currentView = 'front', selectedPanelIds = [], selectedBoxIds = []) {
   const hoverState = updateMoveHover(
     moveState,
     panels,
     boxes,
     localPoint,
     viewport,
-    currentView
+    currentView,
+    selectedPanelIds,
+    selectedBoxIds
   )
 
   if (!hoverState.hoverSnap) {
@@ -433,9 +703,18 @@ export function startMoveFromHover(moveState, panels = [], boxes = [], localPoin
   const targetType = hoverState.hoverSnap.targetType
   const targetId = hoverState.hoverSnap.targetId
   const source = targetType === 'panel' ? panels : boxes
-  const target = source.find((item) => item.id === targetId)
+  const target = targetType === 'selection'
+    ? hoverState.hoverSnap
+    : source.find((item) => item.id === targetId)
+  const linkedPanels = targetType === 'box'
+    ? getPanelsInsideBoxes(panels, [targetId])
+    : []
+  const selectionTarget = targetType === 'selection'
+    ? createSelectionMoveTarget(panels, boxes, selectedPanelIds, selectedBoxIds, currentView)
+    : null
 
-  if (!target) return hoverState
+  if (targetType === 'selection' && !selectionTarget) return hoverState
+  if (targetType !== 'selection' && !target) return hoverState
 
   return {
     ...hoverState,
@@ -444,6 +723,15 @@ export function startMoveFromHover(moveState, panels = [], boxes = [], localPoin
 
     targetType,
     targetId,
+    targetIds: targetType === 'selection'
+      ? {
+          panelIds: selectionTarget.panelIds,
+          boxIds: selectionTarget.boxIds
+        }
+      : {
+          panelIds: targetType === 'panel' ? [targetId] : [],
+          boxIds: targetType === 'box' ? [targetId] : []
+        },
 
     baseSnap: { ...hoverState.hoverSnap },
     basePoint: {
@@ -455,10 +743,21 @@ export function startMoveFromHover(moveState, panels = [], boxes = [], localPoin
       y: toNumber(hoverState.hoverSnap.y)
     },
 
-    originalTarget: { ...target },
+    originalTarget: targetType === 'selection' ? { ...selectionTarget } : { ...target },
+    originalTargets: targetType === 'selection'
+      ? {
+          panels: selectionTarget.panels.map((panel) => ({ ...panel })),
+          boxes: selectionTarget.boxes.map((box) => ({ ...box }))
+        }
+      : targetType === 'box'
+        ? {
+            panels: linkedPanels.map((panel) => ({ ...panel })),
+            boxes: [{ ...target }]
+          }
+        : null,
 
-    // Click lần 1 chỉ chọn điểm gốc, chưa tạo preview.
     previewTarget: null,
+    previewTargets: null,
 
     hoverSnap: null,
     hoverSnapPoints: [],
@@ -469,12 +768,17 @@ export function startMoveFromHover(moveState, panels = [], boxes = [], localPoin
 } // End startMoveFromHover
 
 //=================
-function collectTargetSnapSources(panels = [], boxes = [], movingType, movingId, currentView = 'front') {
+function collectTargetSnapSources(panels = [], boxes = [], moveState, currentView = 'front') {
   const points = []
   const edges = []
+  const movingType = moveState?.targetType
+  const movingId = moveState?.targetId
+  const movingPanelIds = normalizeIds(moveState?.targetIds?.panelIds)
+  const movingBoxIds = normalizeIds(moveState?.targetIds?.boxIds)
 
   panels.forEach((panel) => {
     if (!panel || (movingType === 'panel' && panel.id === movingId)) return
+    if (movingType === 'selection' && movingPanelIds.includes(panel.id)) return
 
     const rect = getPanelViewRect(panel, currentView)
 
@@ -492,6 +796,7 @@ function collectTargetSnapSources(panels = [], boxes = [], movingType, movingId,
 
   boxes.forEach((box) => {
     if (!box || (movingType === 'box' && box.id === movingId)) return
+    if (movingType === 'selection' && movingBoxIds.includes(box.id)) return
 
     const rect = getBoxViewRect(box, currentView)
 
@@ -597,8 +902,7 @@ function resolveMoveTargetPoint(moveState, panels = [], boxes = [], localPoint, 
   const targets = collectTargetSnapSources(
     panels,
     boxes,
-    moveState.targetType,
-    moveState.targetId,
+    moveState,
     currentView
   )
 
@@ -786,6 +1090,21 @@ function moveTargetByViewDelta(targetType, target, dx, dy, currentView = 'front'
 } // End moveTargetByViewDelta
 
 //=================
+function moveSelectionByViewDelta(targets, dx, dy, currentView = 'front') {
+  if (!targets) {
+    return {
+      panels: [],
+      boxes: []
+    }
+  }
+
+  return {
+    panels: (targets.panels || []).map((panel) => movePanelByViewDelta(panel, dx, dy, currentView)),
+    boxes: (targets.boxes || []).map((box) => moveBoxByViewDelta(box, dx, dy, currentView))
+  }
+} // End moveSelectionByViewDelta
+
+//=================
 export function previewMoveToTarget(moveState, panels = [], boxes = [], localPoint, viewport, lockAxis = false, currentView = 'front') {
   if (!moveState.active || moveState.phase !== 'pick-target') {
     return moveState
@@ -810,23 +1129,42 @@ export function previewMoveToTarget(moveState, panels = [], boxes = [], localPoi
     lockAxis
   )
 
-  const dx = toNumber(targetPoint.x) - toNumber(moveState.basePoint.x)
-  const dy = toNumber(targetPoint.y) - toNumber(moveState.basePoint.y)
+  const rawDx = toNumber(targetPoint.x) - toNumber(moveState.basePoint.x)
+  const rawDy = toNumber(targetPoint.y) - toNumber(moveState.basePoint.y)
+  const movingBoxIds = normalizeIds(moveState.targetIds?.boxIds)
+  const panelsThatMoveWithBox = moveState.targetType === 'box' || movingBoxIds.length > 0
+    ? getPanelsInsideBoxes(panels, movingBoxIds)
+    : []
+  const panelIdsThatMoveWithBox = new Set(panelsThatMoveWithBox.map((panel) => panel.id))
+  const panelsToClamp = moveState.targetType === 'panel'
+    ? [moveState.originalTarget]
+    : moveState.targetType === 'selection'
+      ? (moveState.originalTargets?.panels || []).filter((panel) => !panelIdsThatMoveWithBox.has(panel.id))
+      : []
+  const constrainedDelta = clampPanelsDeltaInsideBoxes(panelsToClamp, boxes, rawDx, rawDy, currentView)
+  const dx = constrainedDelta.dx
+  const dy = constrainedDelta.dy
 
-  const previewTarget = moveTargetByViewDelta(
-    moveState.targetType,
-    moveState.originalTarget,
-    dx,
-    dy,
-    currentView
-  )
+  const previewTargets = moveState.targetType === 'selection' || moveState.targetType === 'box'
+    ? moveSelectionByViewDelta(moveState.originalTargets, dx, dy, currentView)
+    : null
+  const previewTarget = moveState.targetType === 'selection'
+    ? createSelectionPreviewTarget(previewTargets, currentView)
+    : moveTargetByViewDelta(
+        moveState.targetType,
+        moveState.originalTarget,
+        dx,
+        dy,
+        currentView
+      )
 
   if (!previewTarget) {
     return {
       ...moveState,
       cursorLocal: localPoint ? { ...localPoint } : null,
       targetSnap: null,
-      previewTarget: null
+      previewTarget: null,
+      previewTargets: null
     }
   }
 
@@ -835,6 +1173,7 @@ export function previewMoveToTarget(moveState, panels = [], boxes = [], localPoi
     cursorLocal: localPoint ? { ...localPoint } : null,
     targetPoint,
     previewTarget,
+    previewTargets,
     targetSnap: resolvedTarget.snap,
     lockAxis: lockAxis ? (Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y') : null
   }
@@ -871,6 +1210,37 @@ export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoin
   }
 
   if (copyMode) {
+    if (nextMoveState.targetType === 'selection') {
+      const copiedPanels = []
+      const copiedBoxes = []
+
+      ;(nextMoveState.previewTargets?.panels || []).forEach((panel) => {
+        const copiedPanel = createMoveCopyTarget('panel', panel, [...panels, ...copiedPanels], boxes)
+
+        if (copiedPanel) copiedPanels.push(copiedPanel)
+      })
+
+      ;(nextMoveState.previewTargets?.boxes || []).forEach((box) => {
+        const copiedBox = createMoveCopyTarget('box', box, panels, [...boxes, ...copiedBoxes])
+
+        if (copiedBox) copiedBoxes.push(copiedBox)
+      })
+
+      return {
+        moveState: resetMoveState(),
+        panels: [...panels, ...copiedPanels],
+        boxes: [...boxes, ...copiedBoxes],
+        movedTarget: {
+          type: 'selection',
+          id: 'selection_group',
+          target: nextMoveState.previewTarget,
+          panelIds: copiedPanels.map((panel) => panel.id),
+          boxIds: copiedBoxes.map((box) => box.id),
+          copyMode: true
+        }
+      }
+    }
+
     const copiedTarget = createMoveCopyTarget(
       nextMoveState.targetType,
       nextMoveState.previewTarget,
@@ -900,7 +1270,14 @@ export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoin
     }
   }
 
+  const previewPanelMap = new Map((nextMoveState.previewTargets?.panels || []).map((panel) => [panel.id, panel]))
+  const previewBoxMap = new Map((nextMoveState.previewTargets?.boxes || []).map((box) => [box.id, box]))
+
   const nextPanels = panels.map((panel) => {
+    if ((nextMoveState.targetType === 'selection' || nextMoveState.targetType === 'box') && previewPanelMap.has(panel.id)) {
+      return previewPanelMap.get(panel.id)
+    }
+
     if (nextMoveState.targetType !== 'panel') return panel
     if (panel.id !== nextMoveState.targetId) return panel
 
@@ -908,6 +1285,10 @@ export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoin
   })
 
   const nextBoxes = boxes.map((box) => {
+    if (nextMoveState.targetType === 'selection' && previewBoxMap.has(box.id)) {
+      return previewBoxMap.get(box.id)
+    }
+
     if (nextMoveState.targetType !== 'box') return box
     if (box.id !== nextMoveState.targetId) return box
 
@@ -922,6 +1303,8 @@ export function commitMoveToTarget(moveState, panels = [], boxes = [], localPoin
       type: nextMoveState.targetType,
       id: nextMoveState.targetId,
       target: nextMoveState.previewTarget,
+      panelIds: normalizeIds(nextMoveState.targetIds?.panelIds),
+      boxIds: normalizeIds(nextMoveState.targetIds?.boxIds),
       copyMode: false
     }
   }

@@ -27,8 +27,181 @@ const store = createSimpleStore({
   selectedPanelId: null,
   selectedPanelIds: [],
   panelInputBuffer: '',
-  move: createMoveState()
+  move: createMoveState(),
+  history: {
+    undoStack: [],
+    redoStack: [],
+    max: 80,
+    applying: false
+  }
 }, (state) => ({
+  //=================
+  cloneHistoryData(value) {
+    return JSON.parse(JSON.stringify(value || []))
+  }, // End cloneHistoryData
+
+  //=================
+  createHistorySnapshot() {
+    const boxStore = useBoxStore()
+
+    return {
+      panels: this.cloneHistoryData(state.panels),
+      boxes: this.cloneHistoryData(boxStore.state.boxes),
+      selectedPanelId: state.selectedPanelId,
+      selectedPanelIds: this.cloneHistoryData(state.selectedPanelIds),
+      selectedBoxId: boxStore.state.selectedBoxId,
+      selectedBoxIds: this.cloneHistoryData(boxStore.state.selectedBoxIds)
+    }
+  }, // End createHistorySnapshot
+
+  //=================
+  restoreHistorySnapshot(snapshot) {
+    if (!snapshot) return
+
+    const boxStore = useBoxStore()
+
+    state.panels = this.cloneHistoryData(snapshot.panels)
+    state.selectedPanelId = snapshot.selectedPanelId || null
+    state.selectedPanelIds = this.cloneHistoryData(snapshot.selectedPanelIds)
+    boxStore.setBoxes(this.cloneHistoryData(snapshot.boxes))
+    boxStore.selectBoxes(this.cloneHistoryData(snapshot.selectedBoxIds))
+    boxStore.state.selectedBoxId = snapshot.selectedBoxId || boxStore.state.selectedBoxIds[0] || null
+    state.move = createMoveState()
+    state.snapPreview = null
+    state.hover = null
+    this.rebuildZones()
+  }, // End restoreHistorySnapshot
+
+  //=================
+  pushHistorySnapshot(label = '') {
+    if (state.history.applying) return
+
+    state.history.undoStack.push({
+      label,
+      snapshot: this.createHistorySnapshot()
+    })
+
+    if (state.history.undoStack.length > state.history.max) {
+      state.history.undoStack.shift()
+    }
+
+    state.history.redoStack = []
+  }, // End pushHistorySnapshot
+
+  //=================
+  undo() {
+    const item = state.history.undoStack.pop()
+
+    if (!item) {
+      useAppStore().setStatus('Undo: không còn thao tác')
+      return false
+    }
+
+    state.history.applying = true
+    state.history.redoStack.push({
+      label: item.label,
+      snapshot: this.createHistorySnapshot()
+    })
+    this.restoreHistorySnapshot(item.snapshot)
+    state.history.applying = false
+    useAppStore().setStatus(`Undo: ${item.label || 'đã phục hồi'}`)
+
+    return true
+  }, // End undo
+
+  //=================
+  redo() {
+    const item = state.history.redoStack.pop()
+
+    if (!item) {
+      useAppStore().setStatus('Redo: không còn thao tác')
+      return false
+    }
+
+    state.history.applying = true
+    state.history.undoStack.push({
+      label: item.label,
+      snapshot: this.createHistorySnapshot()
+    })
+    this.restoreHistorySnapshot(item.snapshot)
+    state.history.applying = false
+    useAppStore().setStatus(`Redo: ${item.label || 'đã phục hồi'}`)
+
+    return true
+  }, // End redo
+
+  //=================
+  hideSelected() {
+    const boxStore = useBoxStore()
+    const panelIds = Array.isArray(state.selectedPanelIds) ? state.selectedPanelIds : []
+    const boxIds = Array.isArray(boxStore.state.selectedBoxIds) ? boxStore.state.selectedBoxIds : []
+
+    if (!panelIds.length && !boxIds.length) {
+      useAppStore().setStatus('Hide: chưa chọn chi tiết')
+      return false
+    }
+
+    this.pushHistorySnapshot('Hide')
+
+    state.panels = state.panels.map((panel) => {
+      if (!panelIds.includes(panel.id)) return panel
+
+      return {
+        ...panel,
+        hidden: true
+      }
+    })
+
+    boxStore.setBoxes(boxStore.state.boxes.map((targetBox) => {
+      if (!boxIds.includes(targetBox.id)) return targetBox
+
+      return {
+        ...targetBox,
+        hidden: true
+      }
+    }))
+
+    state.selectedPanelId = null
+    state.selectedPanelIds = []
+    boxStore.clearSelection()
+    state.move = createMoveState()
+    state.snapPreview = null
+    state.hover = null
+    this.rebuildZones()
+    useAppStore().setStatus('Đã ẩn chi tiết đang chọn')
+
+    return true
+  }, // End hideSelected
+
+  //=================
+  unhideAll() {
+    const boxStore = useBoxStore()
+    const hasHiddenPanel = state.panels.some((panel) => panel.hidden === true)
+    const hasHiddenBox = boxStore.state.boxes.some((targetBox) => targetBox.hidden === true)
+
+    if (!hasHiddenPanel && !hasHiddenBox) {
+      useAppStore().setStatus('Unhide: không có chi tiết đang ẩn')
+      return false
+    }
+
+    this.pushHistorySnapshot('Unhide')
+
+    state.panels = state.panels.map((panel) => ({
+      ...panel,
+      hidden: false
+    }))
+
+    boxStore.setBoxes(boxStore.state.boxes.map((targetBox) => ({
+      ...targetBox,
+      hidden: false
+    })))
+
+    this.rebuildZones()
+    useAppStore().setStatus('Đã hiện lại toàn bộ chi tiết')
+
+    return true
+  }, // End unhideAll
+
   //=================
   isPanelToolAllowed() {
     const app = useAppStore()
@@ -56,6 +229,8 @@ const store = createSimpleStore({
     const allZones = []
 
     box.state.boxes.forEach((baseBox) => {
+      if (baseBox.hidden === true) return
+
       const rect = projectBoxToCameraRect(baseBox, 'front')
       const baseRect = {
         ...rect,
@@ -72,6 +247,8 @@ const store = createSimpleStore({
       }
 
       const panelsInBox = state.panels.filter((panel) => {
+        if (panel.hidden === true) return false
+
         return panel.linkedFrameId === baseBox.id
           || panel.frameId === baseBox.id
           || panel.sourceBoxId === baseBox.id
@@ -475,9 +652,13 @@ const store = createSimpleStore({
         state.panels
       )
 
+      if (!panels.length) return null
+
+      this.pushHistorySnapshot('Tạo tấm')
       state.panels.push(...panels)
 
       if (panels[0]) state.selectedPanelId = panels[0].id
+      state.selectedPanelIds = panels[0] ? [panels[0].id] : []
 
       this.clearPanelInput()
       this.rebuildZones()
@@ -496,8 +677,10 @@ const store = createSimpleStore({
 
     if (!panel) return null
 
+    this.pushHistorySnapshot('Tạo tấm')
     state.panels.push(panel)
     state.selectedPanelId = panel.id
+    state.selectedPanelIds = [panel.id]
 
     this.clearPanelInput()
     this.rebuildZones()
@@ -519,9 +702,13 @@ const store = createSimpleStore({
       state.panels
     )
 
+    if (!panels.length) return []
+
+    this.pushHistorySnapshot('Chia zone')
     state.panels.push(...panels)
 
     if (panels[0]) state.selectedPanelId = panels[0].id
+    state.selectedPanelIds = panels[0] ? [panels[0].id] : []
 
     this.clearPanelInput()
     this.rebuildZones()
@@ -534,8 +721,10 @@ const store = createSimpleStore({
   deleteSelected() {
     if (!state.selectedPanelId) return
 
+    this.pushHistorySnapshot('Xóa tấm')
     state.panels = state.panels.filter((panel) => panel.id !== state.selectedPanelId)
     state.selectedPanelId = null
+    state.selectedPanelIds = []
 
     this.rebuildZones()
     useAppStore().setStatus('Đã xóa tấm đang chọn')
@@ -553,11 +742,13 @@ const store = createSimpleStore({
 
     state.move = updateMoveHover(
       state.move,
-      state.panels,
-      boxStore.state.boxes,
+      state.panels.filter((panel) => panel.hidden !== true),
+      boxStore.state.boxes.filter((targetBox) => targetBox.hidden !== true),
       localPoint,
       viewport,
-      currentView
+      currentView,
+      state.selectedPanelIds,
+      boxStore.state.selectedBoxIds
     )
 
     state.snapPreview = null
@@ -569,11 +760,13 @@ const store = createSimpleStore({
 
     state.move = startMoveFromHover(
       state.move,
-      state.panels,
-      boxStore.state.boxes,
+      state.panels.filter((panel) => panel.hidden !== true),
+      boxStore.state.boxes.filter((targetBox) => targetBox.hidden !== true),
       localPoint,
       viewport,
-      currentView
+      currentView,
+      state.selectedPanelIds,
+      boxStore.state.selectedBoxIds
     )
 
     if (!state.move.active || !state.move.targetId) {
@@ -629,6 +822,10 @@ const store = createSimpleStore({
       copyMode
     )
 
+    if (result.movedTarget) {
+      this.pushHistorySnapshot(result.movedTarget.copyMode ? 'Copy' : 'Move')
+    }
+
     state.move = result.moveState
     state.panels = result.panels
     boxStore.setBoxes(result.boxes)
@@ -636,6 +833,7 @@ const store = createSimpleStore({
 
     if (result.movedTarget?.type === 'panel') {
       state.selectedPanelId = result.movedTarget.id
+      state.selectedPanelIds = [result.movedTarget.id]
       boxStore.clearSelection()
       this.rebuildZones()
       useAppStore().setStatus(result.movedTarget.copyMode ? 'Đã copy tấm' : 'Đã di chuyển tấm')
@@ -643,8 +841,17 @@ const store = createSimpleStore({
 
     if (result.movedTarget?.type === 'box') {
       state.selectedPanelId = null
+      state.selectedPanelIds = []
       boxStore.selectBox(result.movedTarget.id)
       useAppStore().setStatus(result.movedTarget.copyMode ? 'Đã copy Box' : 'Đã di chuyển Box')
+    }
+
+    if (result.movedTarget?.type === 'selection') {
+      state.selectedPanelIds = result.movedTarget.panelIds || []
+      state.selectedPanelId = state.selectedPanelIds[0] || null
+      boxStore.selectBoxes(result.movedTarget.boxIds || [])
+      this.rebuildZones()
+      useAppStore().setStatus(result.movedTarget.copyMode ? 'Đã copy nhóm chi tiết' : 'Đã di chuyển nhóm chi tiết')
     }
 
     return result.movedTarget
@@ -662,6 +869,16 @@ const store = createSimpleStore({
     if (!state.move.active) return null
     if (state.move.phase !== 'pick-target') return null
     if (!state.move.previewTarget) return null
+
+    if (state.move.targetType === 'box' && state.move.previewTargets) {
+      return {
+        type: 'selection',
+        target: {
+          panels: state.move.previewTargets.panels || [],
+          boxes: [state.move.previewTarget]
+        }
+      }
+    }
 
     return {
       type: state.move.targetType,

@@ -82,6 +82,7 @@ const store = createSimpleStore({
 
     if (!box) return null
 
+    useDrawingStore().pushHistorySnapshot('Tạo Box')
     state.boxes.push(box)
     state.selectedBoxId = box.id
     state.selectedBoxIds = [box.id]
@@ -145,6 +146,8 @@ const store = createSimpleStore({
     if (!Number.isFinite(rawValue) || rawValue <= 0) return
 
     const oldBox = { ...item }
+
+    useDrawingStore().pushHistorySnapshot('Sửa kích thước Box')
 
     if (key === 'depth') {
       const anchorY = item.y + item.depth

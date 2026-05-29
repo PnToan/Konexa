@@ -330,7 +330,7 @@ function getPanelRect(panel, currentView = 'front') {
 } // End getPanelRect
 
 //=================
-function drawPanels(ctx, viewport, panels = [], selectedPanelIds = [], currentView = 'front') {
+function drawPanels(ctx, viewport, panels = [], selectedPanelIds = [], currentView = 'front', showIndividualGrips = true) {
   const selectedIds = Array.isArray(selectedPanelIds) ? selectedPanelIds : []
 
   panels.forEach((panel) => {
@@ -346,7 +346,7 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelIds = [], currentVi
       lineWidth: selected ? 3 : 2
     })
 
-    if (!selected) return
+    if (!selected || !showIndividualGrips) return
 
     drawPanelGrip(ctx, viewport, { x: rect.x, y: rect.y })
     drawPanelGrip(ctx, viewport, { x: rect.x + rect.width, y: rect.y })
@@ -356,11 +356,110 @@ function drawPanels(ctx, viewport, panels = [], selectedPanelIds = [], currentVi
 } // End drawPanels
 
 //=================
+function getUnionRect(rects = []) {
+  const validRects = rects.filter((rect) => {
+    return rect
+      && Number.isFinite(rect.x)
+      && Number.isFinite(rect.y)
+      && Number.isFinite(rect.width)
+      && Number.isFinite(rect.height)
+      && rect.width > 0
+      && rect.height > 0
+  })
+
+  if (!validRects.length) return null
+
+  const left = Math.min(...validRects.map((rect) => rect.x))
+  const bottom = Math.min(...validRects.map((rect) => rect.y))
+  const right = Math.max(...validRects.map((rect) => rect.x + rect.width))
+  const top = Math.max(...validRects.map((rect) => rect.y + rect.height))
+
+  return {
+    x: left,
+    y: bottom,
+    width: right - left,
+    height: top - bottom
+  }
+} // End getUnionRect
+
+//=================
+function drawSelectionOuterGrips(ctx, viewport, panels = [], selectedPanelIds = [], boxes = [], selectedBoxIds = [], currentView = 'front') {
+  const panelIds = Array.isArray(selectedPanelIds) ? selectedPanelIds : []
+  const boxIds = Array.isArray(selectedBoxIds) ? selectedBoxIds : []
+  const rects = []
+
+  panels.forEach((panel) => {
+    if (!panelIds.includes(panel.id)) return
+
+    const rect = getPanelRect(panel, currentView)
+
+    if (rect) rects.push(rect)
+  })
+
+  boxes.forEach((box) => {
+    if (!boxIds.includes(box.id)) return
+
+    const rect = projectBoxToCameraRect(box, currentView)
+
+    if (rect) rects.push(rect)
+  })
+
+  const outerRect = getUnionRect(rects)
+
+  if (!outerRect) return
+
+  drawPanelGrip(ctx, viewport, { x: outerRect.x, y: outerRect.y })
+  drawPanelGrip(ctx, viewport, { x: outerRect.x + outerRect.width, y: outerRect.y })
+  drawPanelGrip(ctx, viewport, { x: outerRect.x + outerRect.width, y: outerRect.y + outerRect.height })
+  drawPanelGrip(ctx, viewport, { x: outerRect.x, y: outerRect.y + outerRect.height })
+} // End drawSelectionOuterGrips
+
+//=================
 function drawMovePreviewTarget(ctx, viewport, movePreviewTarget, currentView = 'front') {
   if (!movePreviewTarget?.target) return
 
   const targetType = movePreviewTarget.type
   const target = movePreviewTarget.target
+
+  ctx.save()
+  ctx.setLineDash([8, 5])
+
+  if (targetType === 'selection') {
+    ;(target.panels || []).forEach((panel) => {
+      const panelRect = getPanelRect(panel, currentView)
+
+      if (!panelRect) return
+
+      drawRectLocal(ctx, viewport, panelRect, {
+        fill: 'rgba(37, 99, 235, 0.16)',
+        stroke: '#2563eb',
+        lineWidth: 2
+      })
+    })
+
+    ;(target.boxes || []).forEach((box) => {
+      const boxRect = projectBoxToCameraRect(box, currentView)
+
+      if (!boxRect) return
+
+      drawRectLocal(ctx, viewport, boxRect, {
+        fill: 'rgba(37, 99, 235, 0.14)',
+        stroke: '#2563eb',
+        lineWidth: 2
+      })
+    })
+
+    if (target.rect) {
+      drawRectLocal(ctx, viewport, target.rect, {
+        fill: 'rgba(37, 99, 235, 0.05)',
+        stroke: '#2563eb',
+        lineWidth: 2
+      })
+    }
+
+    ctx.restore()
+    return
+  }
 
   let rect = null
 
@@ -381,11 +480,9 @@ function drawMovePreviewTarget(ctx, viewport, movePreviewTarget, currentView = '
     rect.width <= 0 ||
     rect.height <= 0
   ) {
+    ctx.restore()
     return
   }
-
-  ctx.save()
-  ctx.setLineDash([8, 5])
 
   drawRectLocal(ctx, viewport, rect, {
     fill: targetType === 'panel'
@@ -943,10 +1040,19 @@ export function renderCanvas2D(ctx, payload) {
     drawWallDims(ctx, viewport, wallRect, wallEditingDim)
   }
 
-  drawBoxes(ctx, viewport, boxes, selectedBoxIds || (selectedBoxId ? [selectedBoxId] : []), boxEditingDim, currentView)
+  const activeSelectedPanelIds = selectedPanelIds || (selectedPanelId ? [selectedPanelId] : [])
+  const activeSelectedBoxIds = selectedBoxIds || (selectedBoxId ? [selectedBoxId] : [])
+  const selectedCount = activeSelectedPanelIds.length + activeSelectedBoxIds.length
+
+  drawBoxes(ctx, viewport, boxes, activeSelectedBoxIds, boxEditingDim, currentView)
   drawBoxDraft(ctx, viewport, boxDraftRect, currentView)
   drawZoneOverlay(ctx, viewport, zones, hover)
-  drawPanels(ctx, viewport, panels, selectedPanelIds || (selectedPanelId ? [selectedPanelId] : []), currentView)
+  drawPanels(ctx, viewport, panels, activeSelectedPanelIds, currentView, selectedCount <= 1)
+
+  if (selectedCount > 1) {
+    drawSelectionOuterGrips(ctx, viewport, panels, activeSelectedPanelIds, boxes, activeSelectedBoxIds, currentView)
+  }
+
   drawSelectDragBox(ctx, selectDrag)
   drawMovePreviewTarget(ctx, viewport, movePreviewTarget, currentView)
   drawMoveHoverSnapPoints(ctx, viewport, moveHoverSnapPoints)

@@ -170,7 +170,7 @@ function draw() {
     wallRect: projectBoxToCameraRect(getWallBox3D(), app.state.currentView),
     wallEditingDim: wall.state.editingDim,
     zones: drawing.state.zones,
-    panels: drawing.state.panels,
+    panels: getVisiblePanels(),
     movePreviewTarget: drawing.getMovePreviewTarget(),
     moveHoverSnapPoints: drawing.getMoveHoverSnapPoints(),
     moveTargetSnap: drawing.getMoveTargetSnap(),
@@ -180,7 +180,7 @@ function draw() {
     moveCopyMode: app.state.currentTool === 'move' ? moveCopyMode.value : false,
     panelPreviewItems: drawing.getPanelPreviewItems(),
     panelInputBuffer: drawing.state.panelInputBuffer,
-    boxes: box.state.boxes,
+    boxes: getVisibleBoxes(),
     boxDraftRect: box.getDraftRect(),
     boxEditingDim: box.state.editingDim,
     hover: drawing.state.hover,
@@ -205,6 +205,16 @@ function getDistance(a, b) {
 
   return Math.sqrt(dx * dx + dy * dy)
 } // End getDistance
+
+//=================
+function getVisiblePanels() {
+  return drawing.state.panels.filter((panel) => panel.hidden !== true)
+} // End getVisiblePanels
+
+//=================
+function getVisibleBoxes() {
+  return box.state.boxes.filter((targetBox) => targetBox.hidden !== true)
+} // End getVisibleBoxes
 
 //=================
 function getWallSnapResult(local, wallRect, tolerance) {
@@ -317,7 +327,7 @@ function getExistingBoxSnapResult(local, tolerance = 18) {
     return null
   }
 
-  const boxes = box.state.boxes || []
+  const boxes = getVisibleBoxes()
 
   if (!boxes.length) {
     return null
@@ -638,7 +648,7 @@ function getSelectedIdsByDragRect(selectRect) {
     ? rectTouchesRect
     : rectContainsRect
 
-  const panelIds = drawing.state.panels
+  const panelIds = getVisiblePanels()
     .filter((panel) => {
       const rect = getPanelSelectRect(panel)
 
@@ -648,7 +658,7 @@ function getSelectedIdsByDragRect(selectRect) {
     })
     .map((panel) => panel.id)
 
-  const boxIds = box.state.boxes
+  const boxIds = getVisibleBoxes()
     .filter((targetBox) => {
       const rect = getBoxSelectRect(targetBox)
 
@@ -692,7 +702,7 @@ function updateHover(local) {
     return
   }
 
-  const panelHit = hitTestPanel(drawing.state.panels, local)
+  const panelHit = hitTestPanel(getVisiblePanels(), local)
 
   if (panelHit) {
     drawing.setHover(panelHit)
@@ -1059,7 +1069,7 @@ function onPointerDown(event) {
 
   const boxDimHit = getBoxDimHit(
     app.state.viewport,
-    box.state.boxes,
+    getVisibleBoxes(),
     screenX,
     screenY,
     app.state.currentView
@@ -1135,7 +1145,7 @@ function onPointerDown(event) {
     return
   }
 
-  const panelHit = hitTestPanel(drawing.state.panels, rawLocal)
+  const panelHit = hitTestPanel(getVisiblePanels(), rawLocal)
 
   if (app.state.currentTool === 'select' && panelHit) {
     if (event.shiftKey) {
@@ -1217,7 +1227,7 @@ function onPointerMove(event) {
 
   const boxDimHit = getBoxDimHit(
     app.state.viewport,
-    box.state.boxes,
+    getVisibleBoxes(),
     screenX,
     screenY,
     app.state.currentView
@@ -1321,6 +1331,7 @@ function deleteCurrentSelection() {
 
   if (!hasPanels && !hasBoxes) return false
 
+  drawing.pushHistorySnapshot('Xóa selection')
   drawing.deleteSelectedPanels()
   box.deleteSelectedBoxes()
   drawing.rebuildZones()
@@ -1349,6 +1360,38 @@ function onKeyDown(event) {
   }
 
   if (dimInput.value.active || boxHeightInput.value.active) {
+    return
+  }
+
+  if (event.ctrlKey && !event.shiftKey && (key === 'z' || key === 'Z')) {
+    event.preventDefault()
+    event.stopPropagation()
+    drawing.undo()
+    draw()
+    return
+  }
+
+  if (event.ctrlKey && !event.shiftKey && (key === 'y' || key === 'Y')) {
+    event.preventDefault()
+    event.stopPropagation()
+    drawing.redo()
+    draw()
+    return
+  }
+
+  if (!event.ctrlKey && key === 'H' && event.shiftKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    drawing.unhideAll()
+    draw()
+    return
+  }
+
+  if (!event.ctrlKey && !event.shiftKey && (key === 'h' || key === 'H')) {
+    event.preventDefault()
+    event.stopPropagation()
+    drawing.hideSelected()
+    draw()
     return
   }
 
