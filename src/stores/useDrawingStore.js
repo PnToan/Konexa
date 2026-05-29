@@ -9,7 +9,7 @@ import {
   createSplitPreview,
   splitZoneByCount
 } from '../core/panel/panel-engine'
-import { projectBoxToCameraRect } from '../core/view/view-camera'
+import { getCameraConfig, projectBoxToCameraRect } from '../core/view/view-camera'
 import {
   cancelMove,
   commitMoveToTarget,
@@ -19,6 +19,409 @@ import {
   updateMoveHover
 } from '../core/tools/moveTool'
 
+let dimensionIdSeed = 1
+
+//=================
+function cloneDimensionPoint(point) {
+  if (!point) return null
+
+  return {
+    x: Number(point.x || 0),
+    y: Number(point.y || 0)
+  }
+} // End cloneDimensionPoint
+
+//=================
+function getDimensionDistance(start, end) {
+  if (!start || !end) return 0
+
+  const dx = Number(end.x || 0) - Number(start.x || 0)
+  const dy = Number(end.y || 0) - Number(start.y || 0)
+
+  return Math.sqrt(dx * dx + dy * dy)
+} // End getDimensionDistance
+
+//=================
+function getDimensionAxis(start, end) {
+  if (!start || !end) return 'horizontal'
+
+  return Math.abs(Number(end.x || 0) - Number(start.x || 0)) >= Math.abs(Number(end.y || 0) - Number(start.y || 0))
+    ? 'horizontal'
+    : 'vertical'
+} // End getDimensionAxis
+
+
+//=================
+function toNumber(value, fallback = 0) {
+  const numberValue = Number(value)
+
+  if (!Number.isFinite(numberValue)) return fallback
+
+  return numberValue
+} // End toNumber
+
+//=================
+function getPanelFrameId(panel) {
+  return panel?.linkedFrameId || panel?.frameId || panel?.sourceBoxId || panel?.baseObjectId || null
+} // End getPanelFrameId
+
+//=================
+function getPanelAxisMin(panel, axis) {
+  if (axis === 'x') return toNumber(panel.x3d ?? panel.x, 0)
+  if (axis === 'y') return toNumber(panel.y3d ?? panel.worldY ?? panel.depthY ?? panel.y, 0)
+  if (axis === 'z') return toNumber(panel.z3d ?? panel.z ?? panel.y, 0)
+
+  return 0
+} // End getPanelAxisMin
+
+//=================
+function getPanelAxisSize(panel, axis) {
+  if (axis === 'x') return toNumber(panel.xSize ?? panel.width, 0)
+  if (axis === 'y') return toNumber(panel.ySize ?? panel.depth, 0)
+  if (axis === 'z') return toNumber(panel.zSize ?? panel.height ?? panel.thickness, 0)
+
+  return 0
+} // End getPanelAxisSize
+
+//=================
+function projectPanelAxisValue(value, size, reverse) {
+  if (reverse) return -(value + size)
+
+  return value
+} // End projectPanelAxisValue
+
+//=================
+function getPanelViewRect(panel, currentView = 'front') {
+  if (!panel) return null
+
+  const camera = getCameraConfig(currentView)
+  const uMin = getPanelAxisMin(panel, camera.axisU)
+  const vMin = getPanelAxisMin(panel, camera.axisV)
+  const uSize = getPanelAxisSize(panel, camera.axisU)
+  const vSize = getPanelAxisSize(panel, camera.axisV)
+
+  if (uSize <= 0 || vSize <= 0) return null
+
+  return {
+    x: projectPanelAxisValue(uMin, uSize, camera.reverseU),
+    y: projectPanelAxisValue(vMin, vSize, camera.reverseV),
+    width: uSize,
+    height: vSize
+  }
+} // End getPanelViewRect
+
+//=================
+function getRectPointBySnapKey(rect, snapKey) {
+  if (!rect) return null
+
+  const left = toNumber(rect.x, 0)
+  const right = left + toNumber(rect.width, 0)
+  const bottom = toNumber(rect.y, 0)
+  const top = bottom + toNumber(rect.height, 0)
+  const midX = (left + right) / 2
+  const midY = (bottom + top) / 2
+  const key = String(snapKey || '')
+
+  if (key === 'bottom-left') return { x: left, y: bottom }
+  if (key === 'bottom-right') return { x: right, y: bottom }
+  if (key === 'top-right') return { x: right, y: top }
+  if (key === 'top-left') return { x: left, y: top }
+  if (key === 'bottom-mid') return { x: midX, y: bottom }
+  if (key === 'right-mid') return { x: right, y: midY }
+  if (key === 'top-mid') return { x: midX, y: top }
+  if (key === 'left-mid') return { x: left, y: midY }
+
+  return { x: midX, y: midY }
+} // End getRectPointBySnapKey
+
+//=================
+function getPanelAnchorSide(panel, localAxis) {
+  const side = panel?.panelOffsetFrom || panel?.panelSide || panel?.edge || ''
+
+  if (localAxis === 'x') {
+    if (side === 'right') return 'right'
+    return 'left'
+  }
+
+  if (localAxis === 'y') {
+    if (side === 'top') return 'top'
+    return 'bottom'
+  }
+
+  return null
+} // End getPanelAnchorSide
+
+//=================
+function getDimensionLocalAxis(dimension) {
+  return dimension?.axis === 'vertical' ? 'y' : 'x'
+} // End getDimensionLocalAxis
+
+//=================
+function applyPanelWorldAxisDelta(panel, axis, delta) {
+  const next = { ...panel }
+
+  if (axis === 'x') {
+    const x = getPanelAxisMin(panel, 'x') + delta
+
+    next.x3d = x
+    next.x = x
+
+    return next
+  }
+
+  if (axis === 'y') {
+    const y = getPanelAxisMin(panel, 'y') + delta
+
+    next.y3d = y
+    next.worldY = y
+    next.depthY = y
+
+    return next
+  }
+
+  if (axis === 'z') {
+    const z = getPanelAxisMin(panel, 'z') + delta
+
+    next.z3d = z
+    next.z = z
+    next.y = z
+
+    return next
+  }
+
+  return next
+} // End applyPanelWorldAxisDelta
+
+//=================
+function movePanelByLocalDelta(panel, currentView, localAxis, deltaLocal) {
+  const camera = getCameraConfig(currentView)
+  const worldAxis = localAxis === 'x' ? camera.axisU : camera.axisV
+  const reverse = localAxis === 'x' ? camera.reverseU : camera.reverseV
+  const worldDelta = reverse ? -deltaLocal : deltaLocal
+
+  return applyPanelWorldAxisDelta(panel, worldAxis, worldDelta)
+} // End movePanelByLocalDelta
+
+//=================
+function setPanelWorldAxisMinAndSize(panel, axis, minValue, sizeValue) {
+  const next = { ...panel }
+  const safeSize = Math.max(1, toNumber(sizeValue, 1))
+
+  if (axis === 'x') {
+    next.x3d = minValue
+    next.x = minValue
+    next.xSize = safeSize
+    next.width = safeSize
+
+    return next
+  }
+
+  if (axis === 'y') {
+    next.y3d = minValue
+    next.worldY = minValue
+    next.depthY = minValue
+    next.ySize = safeSize
+    next.depth = safeSize
+
+    return next
+  }
+
+  if (axis === 'z') {
+    next.z3d = minValue
+    next.z = minValue
+    next.y = minValue
+    next.zSize = safeSize
+    next.height = safeSize
+
+    return next
+  }
+
+  return next
+} // End setPanelWorldAxisMinAndSize
+
+//=================
+function resizePanelByLocalAxis(panel, currentView, localAxis, numberValue) {
+  const camera = getCameraConfig(currentView)
+  const worldAxis = localAxis === 'x' ? camera.axisU : camera.axisV
+  const reverse = localAxis === 'x' ? camera.reverseU : camera.reverseV
+  const rect = getPanelViewRect(panel, currentView)
+
+  if (!rect) return panel
+
+  const safeValue = Math.min(
+    Math.max(1, Number(numberValue || 1)),
+    getPanelMaxSizeInsideFrame(panel, currentView, localAxis, Number(numberValue || 1))
+  )
+  const anchorSide = getPanelAnchorSide(panel, localAxis)
+  const localMin = localAxis === 'x' ? rect.x : rect.y
+  const localMax = localMin + (localAxis === 'x' ? rect.width : rect.height)
+  let nextLocalMin = localMin
+
+  if (anchorSide === 'right' || anchorSide === 'top') {
+    nextLocalMin = localMax - safeValue
+  }
+
+  const worldMin = reverse ? -(nextLocalMin + safeValue) : nextLocalMin
+  const next = setPanelWorldAxisMinAndSize(panel, worldAxis, worldMin, safeValue)
+
+  return clampPanelInsideFrame(next, currentView)
+} // End resizePanelByLocalAxis
+
+//=================
+function updatePanelLogicalOffset(panel, currentView) {
+  const frameId = getPanelFrameId(panel)
+  if (!frameId) return panel
+
+  const boxStore = useBoxStore()
+  const sourceBox = boxStore.state.boxes.find((item) => item.id === frameId)
+  const panelRect = getPanelViewRect(panel, currentView)
+
+  if (!sourceBox || !panelRect) return panel
+
+  const boxRect = projectBoxToCameraRect(sourceBox, currentView)
+  const side = panel.panelOffsetFrom || panel.panelSide || panel.edge || ''
+  const panelLeft = panelRect.x
+  const panelRight = panelRect.x + panelRect.width
+  const panelBottom = panelRect.y
+  const panelTop = panelRect.y + panelRect.height
+  const boxLeft = boxRect.x
+  const boxRight = boxRect.x + boxRect.width
+  const boxBottom = boxRect.y
+  const boxTop = boxRect.y + boxRect.height
+  let panelOffset = panel.panelOffset
+
+  if (side === 'left' || side === 'split_vertical') {
+    panelOffset = Math.max(0, panelLeft - boxLeft)
+  } else if (side === 'right') {
+    panelOffset = Math.max(0, boxRight - panelRight)
+  } else if (side === 'bottom' || side === 'split_horizontal') {
+    panelOffset = Math.max(0, panelBottom - boxBottom)
+  } else if (side === 'top') {
+    panelOffset = Math.max(0, boxTop - panelTop)
+  }
+
+  return {
+    ...panel,
+    panelOffset
+  }
+} // End updatePanelLogicalOffset
+
+
+//=================
+function clampPanelInsideFrame(panel, currentView = 'front') {
+  const frameId = getPanelFrameId(panel)
+
+  if (!frameId) return panel
+
+  const boxStore = useBoxStore()
+  const sourceBox = boxStore.state.boxes.find((item) => item.id === frameId)
+  const boxRect = sourceBox ? projectBoxToCameraRect(sourceBox, currentView) : null
+  const panelRect = getPanelViewRect(panel, currentView)
+
+  if (!boxRect || !panelRect) return panel
+
+  let next = panel
+  const panelRight = panelRect.x + panelRect.width
+  const panelTop = panelRect.y + panelRect.height
+  const boxRight = boxRect.x + boxRect.width
+  const boxTop = boxRect.y + boxRect.height
+  let dx = 0
+  let dy = 0
+
+  if (panelRect.x < boxRect.x) dx = boxRect.x - panelRect.x
+  if (panelRight > boxRight) dx = boxRight - panelRight
+  if (panelRect.y < boxRect.y) dy = boxRect.y - panelRect.y
+  if (panelTop > boxTop) dy = boxTop - panelTop
+
+  if (Math.abs(dx) > 0.0001) {
+    next = movePanelByLocalDelta(next, currentView, 'x', dx)
+  }
+
+  if (Math.abs(dy) > 0.0001) {
+    next = movePanelByLocalDelta(next, currentView, 'y', dy)
+  }
+
+  return next
+} // End clampPanelInsideFrame
+
+//=================
+function getPanelMaxSizeInsideFrame(panel, currentView, localAxis, fallbackSize) {
+  const frameId = getPanelFrameId(panel)
+
+  if (!frameId) return fallbackSize
+
+  const boxStore = useBoxStore()
+  const sourceBox = boxStore.state.boxes.find((item) => item.id === frameId)
+  const boxRect = sourceBox ? projectBoxToCameraRect(sourceBox, currentView) : null
+
+  if (!boxRect) return fallbackSize
+
+  return localAxis === 'x'
+    ? Math.max(1, Number(boxRect.width || fallbackSize || 1))
+    : Math.max(1, Number(boxRect.height || fallbackSize || 1))
+} // End getPanelMaxSizeInsideFrame
+
+//=================
+function getDimensionRefLocalPoint(ref, fallback, panels, boxes, currentView) {
+  if (!ref) return cloneDimensionPoint(fallback)
+
+  if (ref.targetType === 'panel') {
+    const panel = panels.find((item) => item.id === ref.targetId)
+    const rect = getPanelViewRect(panel, currentView)
+    const point = getRectPointBySnapKey(rect, ref.snapKey || ref.key)
+
+    return point || cloneDimensionPoint(fallback)
+  }
+
+  if (ref.targetType === 'box') {
+    const targetBox = boxes.find((item) => item.id === ref.targetId)
+    const rect = targetBox ? projectBoxToCameraRect(targetBox, currentView) : null
+    const point = getRectPointBySnapKey(rect, ref.snapKey || ref.key)
+
+    return point || cloneDimensionPoint(fallback)
+  }
+
+  return cloneDimensionPoint(fallback)
+} // End getDimensionRefLocalPoint
+
+//=================
+function createDimensionFromDraft(draft, currentView = 'front') {
+  if (!draft?.start || !draft?.end) return null
+
+  const distance = getDimensionDistance(draft.start, draft.end)
+
+  if (!Number.isFinite(distance) || distance <= 0.001) return null
+
+  const id = `dim_${dimensionIdSeed++}`
+  const axis = getDimensionAxis(draft.start, draft.end)
+  const dx = Number(draft.end.x || 0) - Number(draft.start.x || 0)
+  const dy = Number(draft.end.y || 0) - Number(draft.start.y || 0)
+  const nx = -dy / distance
+  const ny = dx / distance
+  const mid = {
+    x: (Number(draft.start.x || 0) + Number(draft.end.x || 0)) / 2,
+    y: (Number(draft.start.y || 0) + Number(draft.end.y || 0)) / 2
+  }
+  const offsetPoint = cloneDimensionPoint(draft.offsetPoint || draft.end)
+  const offsetDistance = offsetPoint
+    ? ((Number(offsetPoint.x || 0) - mid.x) * nx) + ((Number(offsetPoint.y || 0) - mid.y) * ny)
+    : 28
+
+  return {
+    id,
+    name: `Dim ${dimensionIdSeed - 1}`,
+    view: currentView,
+    start: cloneDimensionPoint(draft.start),
+    end: cloneDimensionPoint(draft.end),
+    offsetPoint,
+    offsetDistance: Math.abs(offsetDistance) > 0.001 ? offsetDistance : 28,
+    startRef: draft.startRef || null,
+    endRef: draft.endRef || null,
+    axis,
+    value: distance
+  }
+} // End createDimensionFromDraft
+
 const store = createSimpleStore({
   panels: [],
   zones: [],
@@ -26,8 +429,20 @@ const store = createSimpleStore({
   snapPreview: null,
   selectedPanelId: null,
   selectedPanelIds: [],
+  selectedDimensionIds: [],
   panelInputBuffer: '',
   move: createMoveState(),
+  dimensions: [],
+  dimensionDraft: {
+    active: false,
+    phase: 'idle',
+    start: null,
+    end: null,
+    offsetPoint: null,
+    startRef: null,
+    endRef: null,
+    hoverSnap: null
+  },
   history: {
     undoStack: [],
     redoStack: [],
@@ -47,8 +462,10 @@ const store = createSimpleStore({
     return {
       panels: this.cloneHistoryData(state.panels),
       boxes: this.cloneHistoryData(boxStore.state.boxes),
+      dimensions: this.cloneHistoryData(state.dimensions),
       selectedPanelId: state.selectedPanelId,
       selectedPanelIds: this.cloneHistoryData(state.selectedPanelIds),
+      selectedDimensionIds: this.cloneHistoryData(state.selectedDimensionIds),
       selectedBoxId: boxStore.state.selectedBoxId,
       selectedBoxIds: this.cloneHistoryData(boxStore.state.selectedBoxIds)
     }
@@ -61,8 +478,10 @@ const store = createSimpleStore({
     const boxStore = useBoxStore()
 
     state.panels = this.cloneHistoryData(snapshot.panels)
+    state.dimensions = this.cloneHistoryData(snapshot.dimensions)
     state.selectedPanelId = snapshot.selectedPanelId || null
     state.selectedPanelIds = this.cloneHistoryData(snapshot.selectedPanelIds)
+    state.selectedDimensionIds = this.cloneHistoryData(snapshot.selectedDimensionIds)
     boxStore.setBoxes(this.cloneHistoryData(snapshot.boxes))
     boxStore.selectBoxes(this.cloneHistoryData(snapshot.selectedBoxIds))
     boxStore.state.selectedBoxId = snapshot.selectedBoxId || boxStore.state.selectedBoxIds[0] || null
@@ -135,8 +554,9 @@ const store = createSimpleStore({
     const boxStore = useBoxStore()
     const panelIds = Array.isArray(state.selectedPanelIds) ? state.selectedPanelIds : []
     const boxIds = Array.isArray(boxStore.state.selectedBoxIds) ? boxStore.state.selectedBoxIds : []
+    const dimensionIds = Array.isArray(state.selectedDimensionIds) ? state.selectedDimensionIds : []
 
-    if (!panelIds.length && !boxIds.length) {
+    if (!panelIds.length && !boxIds.length && !dimensionIds.length) {
       useAppStore().setStatus('Hide: chưa chọn chi tiết')
       return false
     }
@@ -161,8 +581,18 @@ const store = createSimpleStore({
       }
     }))
 
+    state.dimensions = state.dimensions.map((dimension) => {
+      if (!dimensionIds.includes(dimension.id)) return dimension
+
+      return {
+        ...dimension,
+        hidden: true
+      }
+    })
+
     state.selectedPanelId = null
     state.selectedPanelIds = []
+    state.selectedDimensionIds = []
     boxStore.clearSelection()
     state.move = createMoveState()
     state.snapPreview = null
@@ -178,8 +608,9 @@ const store = createSimpleStore({
     const boxStore = useBoxStore()
     const hasHiddenPanel = state.panels.some((panel) => panel.hidden === true)
     const hasHiddenBox = boxStore.state.boxes.some((targetBox) => targetBox.hidden === true)
+    const hasHiddenDimension = state.dimensions.some((dimension) => dimension.hidden === true)
 
-    if (!hasHiddenPanel && !hasHiddenBox) {
+    if (!hasHiddenPanel && !hasHiddenBox && !hasHiddenDimension) {
       useAppStore().setStatus('Unhide: không có chi tiết đang ẩn')
       return false
     }
@@ -195,6 +626,11 @@ const store = createSimpleStore({
       ...targetBox,
       hidden: false
     })))
+
+    state.dimensions = state.dimensions.map((dimension) => ({
+      ...dimension,
+      hidden: false
+    }))
 
     this.rebuildZones()
     useAppStore().setStatus('Đã hiện lại toàn bộ chi tiết')
@@ -529,6 +965,11 @@ const store = createSimpleStore({
     state.selectedPanelIds = ids
     state.selectedPanelId = ids[0] || null
   }, // End selectPanels
+
+  //=================
+  selectDimensions(dimensionIds) {
+    state.selectedDimensionIds = Array.isArray(dimensionIds) ? dimensionIds.filter(Boolean) : []
+  }, // End selectDimensions
   //=================
   deleteSelectedPanels() {
     const selectedIds = Array.isArray(state.selectedPanelIds) ? state.selectedPanelIds : []
@@ -541,9 +982,20 @@ const store = createSimpleStore({
   }, // End deleteSelectedPanels
 
   //=================
+  deleteSelectedDimensions() {
+    const selectedIds = Array.isArray(state.selectedDimensionIds) ? state.selectedDimensionIds : []
+
+    if (!selectedIds.length) return
+
+    state.dimensions = state.dimensions.filter((dimension) => !selectedIds.includes(dimension.id))
+    state.selectedDimensionIds = []
+  }, // End deleteSelectedDimensions
+
+  //=================
   clearSelection() {
     state.selectedPanelId = null
     state.selectedPanelIds = []
+    state.selectedDimensionIds = []
   }, // End clearSelection
 
   //=================
@@ -729,6 +1181,208 @@ const store = createSimpleStore({
     this.rebuildZones()
     useAppStore().setStatus('Đã xóa tấm đang chọn')
   }, // End deleteSelected
+
+
+  //=================
+  resetDimensionTool() {
+    state.dimensionDraft = {
+      active: false,
+      phase: 'idle',
+      start: null,
+      end: null,
+      offsetPoint: null,
+      startRef: null,
+      endRef: null,
+      hoverSnap: null
+    }
+  }, // End resetDimensionTool
+
+  //=================
+  setDimensionHoverSnap(snapPoint) {
+    state.dimensionDraft.hoverSnap = snapPoint || null
+  }, // End setDimensionHoverSnap
+
+  //=================
+  startOrContinueDimension(localPoint, snapRef = null, currentView = 'front') {
+    if (!localPoint) return null
+
+    if (!state.dimensionDraft.active || state.dimensionDraft.phase === 'idle') {
+      state.dimensionDraft = {
+        active: true,
+        phase: 'pick-end',
+        start: cloneDimensionPoint(localPoint),
+        end: null,
+        offsetPoint: null,
+        startRef: snapRef || null,
+        endRef: null,
+        hoverSnap: snapRef ? { ...localPoint, ...snapRef } : null
+      }
+      useAppStore().setStatus('Dimensions: chọn điểm cuối')
+      return state.dimensionDraft
+    }
+
+    if (state.dimensionDraft.phase === 'pick-end') {
+      const distance = getDimensionDistance(state.dimensionDraft.start, localPoint)
+
+      if (distance <= 0.001) {
+        useAppStore().setStatus('Dimensions: điểm cuối trùng điểm đầu')
+        return state.dimensionDraft
+      }
+
+      state.dimensionDraft.end = cloneDimensionPoint(localPoint)
+      state.dimensionDraft.endRef = snapRef || null
+      state.dimensionDraft.offsetPoint = cloneDimensionPoint(localPoint)
+      state.dimensionDraft.phase = 'place'
+      useAppStore().setStatus('Dimensions: kéo ra vị trí đặt dim rồi click')
+      return state.dimensionDraft
+    }
+
+    if (state.dimensionDraft.phase === 'place') {
+      state.dimensionDraft.offsetPoint = cloneDimensionPoint(localPoint)
+      const dimension = createDimensionFromDraft(state.dimensionDraft, currentView)
+
+      if (!dimension) {
+        this.resetDimensionTool()
+        useAppStore().setStatus('Dimensions: dim không hợp lệ')
+        return null
+      }
+
+      this.pushHistorySnapshot('Tạo Dimensions')
+      state.dimensions.push(dimension)
+      this.resetDimensionTool()
+      useAppStore().setStatus(`Đã tạo ${dimension.name}`)
+      return dimension
+    }
+
+    return state.dimensionDraft
+  }, // End startOrContinueDimension
+
+  //=================
+  previewDimension(localPoint, snapRef = null) {
+    if (!localPoint) return
+
+    state.dimensionDraft.hoverSnap = snapRef ? { ...localPoint, ...snapRef } : null
+
+    if (!state.dimensionDraft.active) return
+
+    if (state.dimensionDraft.phase === 'pick-end') {
+      state.dimensionDraft.end = cloneDimensionPoint(localPoint)
+      state.dimensionDraft.endRef = snapRef || null
+    }
+
+    if (state.dimensionDraft.phase === 'place') {
+      state.dimensionDraft.offsetPoint = cloneDimensionPoint(localPoint)
+    }
+  }, // End previewDimension
+
+  //=================
+  getDimensionDraft() {
+    return state.dimensionDraft || null
+  }, // End getDimensionDraft
+
+  //=================
+  getDimensionById(dimensionId) {
+    return state.dimensions.find((dimension) => dimension.id === dimensionId) || null
+  }, // End getDimensionById
+
+  //=================
+  setDimensionValue(dimensionId, value) {
+    const dimension = this.getDimensionById(dimensionId)
+    const numberValue = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value)
+
+    if (!dimension || !Number.isFinite(numberValue) || numberValue <= 0) return false
+
+    const boxStore = useBoxStore()
+    const currentView = dimension.view || useAppStore().state.currentView || 'front'
+    const localAxis = getDimensionLocalAxis(dimension)
+    const axisKey = localAxis === 'x' ? 'x' : 'y'
+    const startRef = dimension.startRef || null
+    const endRef = dimension.endRef || null
+    const startPanelId = startRef?.targetType === 'panel' ? startRef.targetId : null
+    const endPanelId = endRef?.targetType === 'panel' ? endRef.targetId : null
+    const samePanelResize = startPanelId && endPanelId && startPanelId === endPanelId
+    const startPoint = getDimensionRefLocalPoint(startRef, dimension.start, state.panels, boxStore.state.boxes, currentView)
+    const endPoint = getDimensionRefLocalPoint(endRef, dimension.end, state.panels, boxStore.state.boxes, currentView)
+    const oldValue = getDimensionDistance(startPoint, endPoint)
+
+    if (!Number.isFinite(oldValue) || oldValue <= 0.001) return false
+
+    this.pushHistorySnapshot('Sửa Dimensions')
+
+    if (samePanelResize) {
+      state.panels = state.panels.map((panel) => {
+        if (panel.id !== startPanelId) return panel
+
+        return updatePanelLogicalOffset(
+          resizePanelByLocalAxis(panel, currentView, localAxis, numberValue),
+          currentView
+        )
+      })
+    } else {
+      const movingRef = endPanelId ? endRef : startPanelId ? startRef : null
+      const fixedPoint = endPanelId ? startPoint : startPanelId ? endPoint : startPoint
+      const movingPoint = endPanelId ? endPoint : startPanelId ? startPoint : endPoint
+      const movingPanelId = movingRef?.targetId || null
+
+      if (movingPanelId) {
+        const currentDistance = toNumber(movingPoint?.[axisKey], 0) - toNumber(fixedPoint?.[axisKey], 0)
+        const sign = currentDistance < 0 ? -1 : 1
+        const targetCoordinate = toNumber(fixedPoint?.[axisKey], 0) + sign * numberValue
+        const deltaLocal = targetCoordinate - toNumber(movingPoint?.[axisKey], 0)
+
+        state.panels = state.panels.map((panel) => {
+          if (panel.id !== movingPanelId) return panel
+
+          return updatePanelLogicalOffset(
+            clampPanelInsideFrame(movePanelByLocalDelta(panel, currentView, localAxis, deltaLocal), currentView),
+            currentView
+          )
+        })
+      } else {
+        const dx = toNumber(endPoint.x, 0) - toNumber(startPoint.x, 0)
+        const dy = toNumber(endPoint.y, 0) - toNumber(startPoint.y, 0)
+        const scale = numberValue / oldValue
+
+        dimension.end = {
+          x: toNumber(startPoint.x, 0) + dx * scale,
+          y: toNumber(startPoint.y, 0) + dy * scale
+        }
+      }
+    }
+
+    const refreshedStart = getDimensionRefLocalPoint(startRef, dimension.start, state.panels, boxStore.state.boxes, currentView)
+    const refreshedEnd = getDimensionRefLocalPoint(endRef, dimension.end, state.panels, boxStore.state.boxes, currentView)
+
+    dimension.start = refreshedStart
+    dimension.end = refreshedEnd
+    dimension.axis = getDimensionAxis(refreshedStart, refreshedEnd)
+    dimension.value = numberValue
+
+    this.rebuildZones()
+    useAppStore().setStatus(`Dimensions: ${Math.round(numberValue)}`)
+
+    return true
+  }, // End setDimensionValue
+
+  //=================
+  getRenderableDimensions(currentView = 'front') {
+    const boxStore = useBoxStore()
+
+    return state.dimensions
+      .filter((dimension) => dimension.hidden !== true)
+      .map((dimension) => {
+        const start = getDimensionRefLocalPoint(dimension.startRef, dimension.start, state.panels, boxStore.state.boxes, currentView)
+        const end = getDimensionRefLocalPoint(dimension.endRef, dimension.end, state.panels, boxStore.state.boxes, currentView)
+
+        return {
+          ...dimension,
+          start,
+          end,
+          axis: getDimensionAxis(start, end),
+          value: getDimensionDistance(start, end)
+        }
+      })
+  }, // End getRenderableDimensions
 
   //=================
   resetMoveTool() {

@@ -791,6 +791,179 @@ function drawSnapPreview(ctx, viewport, snapPreview) {
   ctx.restore()
 } // End drawSnapPreview
 
+
+//=================
+function getDimensionGeometry(dimension) {
+  if (!dimension?.start || !dimension?.end) return null
+
+  const start = dimension.start
+  const end = dimension.end
+  const offsetPoint = dimension.offsetPoint || end
+  const dx = Number(end.x || 0) - Number(start.x || 0)
+  const dy = Number(end.y || 0) - Number(start.y || 0)
+  const length = Math.sqrt(dx * dx + dy * dy)
+
+  if (!Number.isFinite(length) || length <= 0.001) return null
+
+  const ux = dx / length
+  const uy = dy / length
+  const nx = -uy
+  const ny = ux
+  const mid = {
+    x: (Number(start.x || 0) + Number(end.x || 0)) / 2,
+    y: (Number(start.y || 0) + Number(end.y || 0)) / 2
+  }
+  const storedOffset = Number(dimension.offsetDistance)
+  const pointOffset = ((Number(offsetPoint.x || 0) - mid.x) * nx) + ((Number(offsetPoint.y || 0) - mid.y) * ny)
+  const offsetDistance = Number.isFinite(storedOffset) ? storedOffset : pointOffset
+  const finalOffset = Math.abs(offsetDistance) > 0.001 ? offsetDistance : 28
+  const dimStart = {
+    x: Number(start.x || 0) + nx * finalOffset,
+    y: Number(start.y || 0) + ny * finalOffset
+  }
+  const dimEnd = {
+    x: Number(end.x || 0) + nx * finalOffset,
+    y: Number(end.y || 0) + ny * finalOffset
+  }
+  const textPoint = {
+    x: (dimStart.x + dimEnd.x) / 2,
+    y: (dimStart.y + dimEnd.y) / 2
+  }
+
+  return {
+    start,
+    end,
+    dimStart,
+    dimEnd,
+    textPoint,
+    length,
+    nx,
+    ny,
+    ux,
+    uy
+  }
+} // End getDimensionGeometry
+
+//=================
+function drawArrowTick(ctx, point, ux, uy, size = 9) {
+  const nx = -uy
+  const ny = ux
+
+  ctx.beginPath()
+  ctx.moveTo(point.x - nx * size, point.y - ny * size)
+  ctx.lineTo(point.x + nx * size, point.y + ny * size)
+  ctx.stroke()
+} // End drawArrowTick
+
+//=================
+function drawDimensions(ctx, viewport, dimensions = [], dimensionDraft = null, editingDimensionId = null, selectedDimensionIds = []) {
+  const items = Array.isArray(dimensions) ? dimensions.slice() : []
+
+  if (dimensionDraft?.active && dimensionDraft.start && dimensionDraft.end) {
+    items.push({
+      id: '__draft_dimension__',
+      start: dimensionDraft.start,
+      end: dimensionDraft.end,
+      offsetPoint: dimensionDraft.offsetPoint || dimensionDraft.end,
+      draft: true
+    })
+  }
+
+  if (!items.length) return
+
+  ctx.save()
+  ctx.font = '12px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  items.forEach((dimension) => {
+    const geo = getDimensionGeometry(dimension)
+
+    if (!geo) return
+
+    const start = localToScreen(viewport, geo.start.x, geo.start.y)
+    const end = localToScreen(viewport, geo.end.x, geo.end.y)
+    const dimStart = localToScreen(viewport, geo.dimStart.x, geo.dimStart.y)
+    const dimEnd = localToScreen(viewport, geo.dimEnd.x, geo.dimEnd.y)
+    const textPoint = localToScreen(viewport, geo.textPoint.x, geo.textPoint.y)
+    const ux = dimEnd.x - dimStart.x
+    const uy = dimEnd.y - dimStart.y
+    const screenLength = Math.sqrt(ux * ux + uy * uy) || 1
+    const sux = ux / screenLength
+    const suy = uy / screenLength
+    const selected = Array.isArray(selectedDimensionIds) && selectedDimensionIds.includes(dimension.id)
+    const color = selected ? '#ff9f1a' : dimension.draft ? '#ff9f1a' : '#0077CC'
+    const label = String(Math.round(Number(dimension.value || geo.length)))
+    const isEditing = dimension.id === editingDimensionId
+    const isVertical = Math.abs(suy) > Math.abs(sux)
+
+    ctx.strokeStyle = color
+    ctx.fillStyle = color
+    ctx.lineWidth = isEditing || selected ? 2.5 : 2
+    ctx.setLineDash(dimension.draft ? [6, 4] : [])
+
+    ctx.setLineDash([5, 4])
+    drawLine(ctx, start, dimStart, color, 1.5)
+    drawLine(ctx, end, dimEnd, color, 1.5)
+    ctx.setLineDash([])
+    drawLine(ctx, dimStart, dimEnd, color, isEditing ? 2.5 : 2)
+    drawArrowTick(ctx, dimStart, sux, suy, 8)
+    drawArrowTick(ctx, dimEnd, sux, suy, 8)
+
+    ctx.setLineDash([])
+    ctx.fillStyle = color
+
+    if (isVertical) {
+      ctx.save()
+      ctx.translate(textPoint.x - 16, textPoint.y)
+      ctx.rotate(-Math.PI / 2)
+      ctx.fillText(label, 0, 0)
+      ctx.restore()
+    } else {
+      ctx.fillText(label, textPoint.x, textPoint.y - 12)
+    }
+  })
+
+  if (dimensionDraft?.hoverSnap) {
+    const point = localToScreen(viewport, dimensionDraft.hoverSnap.x, dimensionDraft.hoverSnap.y)
+
+    ctx.fillStyle = '#ffffff'
+    ctx.strokeStyle = '#ff9f1a'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(point.x, point.y, 5, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+  }
+
+  ctx.restore()
+} // End drawDimensions
+
+//=================
+function hitTestDimensions(viewport, dimensions = [], screenX, screenY) {
+  for (let i = dimensions.length - 1; i >= 0; i -= 1) {
+    const dimension = dimensions[i]
+    const geo = getDimensionGeometry(dimension)
+
+    if (!geo) continue
+
+    const textPoint = localToScreen(viewport, geo.textPoint.x, geo.textPoint.y)
+    const textHit = Math.abs(screenX - textPoint.x) <= 34 && Math.abs(screenY - textPoint.y) <= 16
+
+    if (textHit) {
+      return {
+        target: 'dimension',
+        dimensionId: dimension.id,
+        value: Math.round(Number(dimension.value || geo.length)),
+        x: textPoint.x,
+        y: textPoint.y
+      }
+    }
+  }
+
+  return null
+} // End hitTestDimensions
+
 //=================
 function getBoxViewDimKeys(currentView = 'top') {
   if (currentView === 'front' || currentView === 'back') {
@@ -971,6 +1144,11 @@ export function getWallDimHit(viewport, wallRect, screenX, screenY) {
 export function getBoxDimHit(viewport, boxes, screenX, screenY, currentView = 'top') {
   return hitTestBoxDim(viewport, boxes, screenX, screenY, currentView)
 } // End getBoxDimHit
+
+//=================
+export function getDimensionHit(viewport, dimensions, screenX, screenY) {
+  return hitTestDimensions(viewport, dimensions, screenX, screenY)
+} // End getDimensionHit
 //=================
 function drawSelectDragBox(ctx, selectDrag) {
   if (!selectDrag || !selectDrag.active || !selectDrag.start || !selectDrag.current) return
@@ -1024,7 +1202,11 @@ export function renderCanvas2D(ctx, payload) {
     selectedPanelIds,
     selectedBoxId,
     selectedBoxIds,
+    selectedDimensionIds,
     selectDrag,
+    dimensions,
+    dimensionDraft,
+    editingDimensionId,
     showGrid
   } = payload
 
@@ -1060,6 +1242,7 @@ export function renderCanvas2D(ctx, payload) {
   drawPanelPreviewItems(ctx, viewport, panelPreviewItems, hover, currentView)
   drawPanelInputBuffer(ctx, viewport, hover, panelInputBuffer)
   drawSnapPreview(ctx, viewport, snapPreview)
+  drawDimensions(ctx, viewport, dimensions, dimensionDraft, editingDimensionId, selectedDimensionIds)
   drawMoveCursorIcon(ctx, viewport, moveCursorLocal, moveCopyMode)
   drawRulers(ctx, viewport, width, height)
 } // End renderCanvas2D

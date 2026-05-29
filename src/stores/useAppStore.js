@@ -107,7 +107,8 @@ const TOOL_LABEL = {
  panel: 'Vẽ Tấm',
  move: 'Di chuyển',
  offset: 'Offset',
- measure: 'Đo'
+ measure: 'Đo',
+ dimensions: 'Dimensions'
 }
 
 const store = createSimpleStore({

@@ -56,7 +56,7 @@ import { useCabinetStore } from '../../stores/useCabinetStore'
 import { useWallStore } from '../../stores/useWallStore'
 import { useDrawingStore } from '../../stores/useDrawingStore'
 import { useBoxStore } from '../../stores/useBoxStore'
-import { renderCanvas2D, getWallDimHit, getBoxDimHit } from '../../renderers/canvas-2d-renderer'
+import { renderCanvas2D, getWallDimHit, getBoxDimHit, getDimensionHit } from '../../renderers/canvas-2d-renderer'
 import { screenToLocal, localToScreen } from '../../renderers/viewport-transform'
 import { projectBoxToCameraRect, cameraLocalToWorldPoint } from '../../core/view/view-camera'
 import { hitTestPanel, hitTestZoneEdge } from '../../core/snap/snap-engine'
@@ -75,6 +75,7 @@ const boxHeightInputRef = ref(null)
 const dimInput = ref({
   active: false,
   key: null,
+  dimensionId: null,
   x: 0,
   y: 0,
   value: ''
@@ -131,6 +132,7 @@ const boxHeightInputStyle = computed(() => ({
 //=================
 const canvasCursorClass = computed(() => {
   if (app.state.currentTool === 'move') return 'mn-cursor-move'
+  if (app.state.currentTool === 'dimensions') return 'mn-cursor-dimensions'
   if (hoverDim.value && app.state.currentTool === 'select') return 'mn-cursor-pointer'
   if (app.state.currentTool === 'box') return 'mn-cursor-box'
   if (app.state.currentTool === 'panel') return 'mn-cursor-crosshair'
@@ -190,6 +192,10 @@ function draw() {
     selectedBoxId: box.state.selectedBoxId,
     selectedBoxIds: box.state.selectedBoxIds,
     selectDrag: selectDrag.value,
+    dimensions: drawing.getRenderableDimensions(app.state.currentView),
+    selectedDimensionIds: drawing.state.selectedDimensionIds,
+    dimensionDraft: drawing.getDimensionDraft(),
+    editingDimensionId: dimInput.value.target === 'dimension' ? dimInput.value.dimensionId : null,
     showGrid: app.state.showGrid
   })
 } // End draw
@@ -635,12 +641,204 @@ function getBoxSelectRect(targetBox) {
 
   return localRectToScreenRect(rect)
 } // End getBoxSelectRect
+
+//=================
+function getPanelLocalRect(panel) {
+  if (!panel) return null
+
+  const view = app.getViewConfig(app.state.currentView)
+  const axisU = String(view.axisA || 'X').toLowerCase()
+  const axisV = String(view.axisB || 'Z').toLowerCase()
+
+  const getAxisMin = (target, axis) => {
+    if (axis === 'x') return Number(target.x || 0)
+    if (axis === 'y') return Number((target.y3d ?? target.worldY ?? target.depthY ?? target.y) || 0)
+    if (axis === 'z') return Number(target.z ?? target.y ?? 0)
+
+    return 0
+  }
+
+  const getAxisSize = (target, axis) => {
+    if (axis === 'x') return Number(target.xSize ?? target.width ?? 0)
+    if (axis === 'y') return Number(target.ySize ?? target.depth ?? 0)
+    if (axis === 'z') return Number(target.zSize ?? target.height ?? target.thickness ?? 0)
+
+    return 0
+  }
+
+  const projectAxisValue = (value, size, reverse) => {
+    if (reverse) return -(value + size)
+
+    return value
+  }
+
+  const uMin = getAxisMin(panel, axisU)
+  const vMin = getAxisMin(panel, axisV)
+  const uSize = getAxisSize(panel, axisU)
+  const vSize = getAxisSize(panel, axisV)
+
+  if (uSize <= 0 || vSize <= 0) return null
+
+  return {
+    x: projectAxisValue(uMin, uSize, view.reverseHorizontal),
+    y: projectAxisValue(vMin, vSize, view.reverseVertical),
+    width: uSize,
+    height: vSize
+  }
+} // End getPanelLocalRect
+
+//=================
+function collectDimensionSnapPoints() {
+  const points = []
+  const wallRect = projectBoxToCameraRect(getWallBox3D(), app.state.currentView)
+
+  const addRectPoints = (rect, ref) => {
+    if (!rect) return
+
+    const left = Number(rect.x || 0)
+    const right = left + Number(rect.width || 0)
+    const bottom = Number(rect.y || 0)
+    const top = bottom + Number(rect.height || 0)
+    const midX = (left + right) / 2
+    const midY = (bottom + top) / 2
+
+    const makeRef = (snapKey) => ({ ...(ref || {}), snapKey })
+
+    points.push(
+      { x: left, y: bottom, type: 'corner', key: 'bottom-left', ref: makeRef('bottom-left') },
+      { x: right, y: bottom, type: 'corner', key: 'bottom-right', ref: makeRef('bottom-right') },
+      { x: right, y: top, type: 'corner', key: 'top-right', ref: makeRef('top-right') },
+      { x: left, y: top, type: 'corner', key: 'top-left', ref: makeRef('top-left') },
+      { x: midX, y: bottom, type: 'midpoint', key: 'bottom-mid', ref: makeRef('bottom-mid') },
+      { x: right, y: midY, type: 'midpoint', key: 'right-mid', ref: makeRef('right-mid') },
+      { x: midX, y: top, type: 'midpoint', key: 'top-mid', ref: makeRef('top-mid') },
+      { x: left, y: midY, type: 'midpoint', key: 'left-mid', ref: makeRef('left-mid') }
+    )
+  }
+
+  addRectPoints(wallRect, { targetType: 'wall', targetId: 'wall' })
+
+  getVisibleBoxes().forEach((targetBox) => {
+    addRectPoints(projectBoxToCameraRect(targetBox, app.state.currentView), {
+      targetType: 'box',
+      targetId: targetBox.id
+    })
+  })
+
+  getVisiblePanels().forEach((panel) => {
+    addRectPoints(getPanelLocalRect(panel), {
+      targetType: 'panel',
+      targetId: panel.id
+    })
+  })
+
+  return points
+} // End collectDimensionSnapPoints
+
+//=================
+function getDimensionSnapResult(local, tolerance = 16) {
+  if (!local) {
+    return {
+      point: local,
+      ref: null,
+      snap: null
+    }
+  }
+
+  const scale = app.state.viewport.localScale * app.state.viewport.zoom
+  const toleranceLocal = tolerance / Math.max(0.0001, scale)
+  let best = null
+
+  collectDimensionSnapPoints().forEach((point) => {
+    const distance = getDistance(local, point)
+
+    if (distance > toleranceLocal) return
+    if (best && distance >= best.distance) return
+
+    best = {
+      ...point,
+      distance
+    }
+  })
+
+  if (!best) {
+    return {
+      point: local,
+      ref: null,
+      snap: null
+    }
+  }
+
+  return {
+    point: {
+      x: best.x,
+      y: best.y
+    },
+    ref: best.ref || null,
+    snap: best
+  }
+} // End getDimensionSnapResult
+
+//=================
+function getDimensionSelectRect(dimension) {
+  if (!dimension?.start || !dimension?.end) return null
+
+  const start = localToScreen(app.state.viewport, dimension.start.x, dimension.start.y)
+  const end = localToScreen(app.state.viewport, dimension.end.x, dimension.end.y)
+  const length = getDistance(dimension.start, dimension.end)
+
+  if (!Number.isFinite(length) || length <= 0.001) return null
+
+  const dx = Number(dimension.end.x || 0) - Number(dimension.start.x || 0)
+  const dy = Number(dimension.end.y || 0) - Number(dimension.start.y || 0)
+  const nx = -dy / length
+  const ny = dx / length
+  const mid = {
+    x: (Number(dimension.start.x || 0) + Number(dimension.end.x || 0)) / 2,
+    y: (Number(dimension.start.y || 0) + Number(dimension.end.y || 0)) / 2
+  }
+  const offsetDistance = Number.isFinite(Number(dimension.offsetDistance)) ? Number(dimension.offsetDistance) : 28
+  const dimStartLocal = {
+    x: Number(dimension.start.x || 0) + nx * offsetDistance,
+    y: Number(dimension.start.y || 0) + ny * offsetDistance
+  }
+  const dimEndLocal = {
+    x: Number(dimension.end.x || 0) + nx * offsetDistance,
+    y: Number(dimension.end.y || 0) + ny * offsetDistance
+  }
+  const dimStart = localToScreen(app.state.viewport, dimStartLocal.x, dimStartLocal.y)
+  const dimEnd = localToScreen(app.state.viewport, dimEndLocal.x, dimEndLocal.y)
+  const xs = [start.x, end.x, dimStart.x, dimEnd.x]
+  const ys = [start.y, end.y, dimStart.y, dimEnd.y]
+  const padding = 10
+
+  return {
+    x: Math.min(...xs) - padding,
+    y: Math.min(...ys) - padding,
+    width: Math.max(...xs) - Math.min(...xs) + padding * 2,
+    height: Math.max(...ys) - Math.min(...ys) + padding * 2
+  }
+} // End getDimensionSelectRect
+
+//=================
+function refreshDimensionSnapFromMouse() {
+  const mouseLocal = {
+    x: Number(app.state.mouse.localX || 0),
+    y: Number(app.state.mouse.localY || 0)
+  }
+  const snapResult = getDimensionSnapResult(mouseLocal)
+
+  drawing.previewDimension(snapResult.point, snapResult.ref)
+  drawing.setDimensionHoverSnap(snapResult.ref ? { ...snapResult.point, ...snapResult.ref } : null)
+} // End refreshDimensionSnapFromMouse
+
 //=================
 function getSelectedIdsByDragRect(selectRect) {
   if (!selectRect) {
     return {
       panelIds: [],
-      boxIds: []
+      boxIds: [],
+      dimensionIds: []
     }
   }
 
@@ -668,9 +866,20 @@ function getSelectedIdsByDragRect(selectRect) {
     })
     .map((targetBox) => targetBox.id)
 
+  const dimensionIds = drawing.getRenderableDimensions(app.state.currentView)
+    .filter((dimension) => {
+      const rect = getDimensionSelectRect(dimension)
+
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false
+
+      return checkRect(selectRect, rect)
+    })
+    .map((dimension) => dimension.id)
+
   return {
     panelIds,
-    boxIds
+    boxIds,
+    dimensionIds
   }
 } // End getSelectedIdsByDragRect
 //=================
@@ -819,20 +1028,27 @@ function getBoxDimInputInfo(dimHit) {
 } // End getBoxDimInputInfo
 //=================
 function openDimInput(dimHit) {
-  const info = typeof dimHit === 'string'
-    ? getWallDimInputInfo(dimHit)
-    : getBoxDimInputInfo(dimHit)
+  const info = dimHit?.target === 'dimension'
+    ? dimHit
+    : typeof dimHit === 'string'
+      ? getWallDimInputInfo(dimHit)
+      : getBoxDimInputInfo(dimHit)
   if (!info) return
   dimInput.value = {
     active: true,
     target: info.target || 'wall',
     boxId: info.boxId || null,
+    dimensionId: info.dimensionId || null,
     key: info.key,
     x: info.x,
     y: info.y,
     value: info.value
   }
-  if (dimInput.value.target === 'box') {
+  if (dimInput.value.target === 'dimension') {
+    drawing.setDimensionValue(dimInput.value.dimensionId, numberValue)
+    wall.clearEditingDim()
+    box.clearEditingDim()
+  } else if (dimInput.value.target === 'box') {
     box.selectBox(info.boxId)
     box.setEditingDim(info.key)
     wall.clearEditingDim()
@@ -988,7 +1204,10 @@ function commitDimInput() {
     drawing.rebuildZones()
   }
 
-  if (dimInput.value.target === 'box') {
+  if (dimInput.value.target === 'dimension') {
+    wall.clearEditingDim()
+    box.clearEditingDim()
+  } else if (dimInput.value.target === 'box') {
     box.setBoxSize(
       dimInput.value.boxId,
       dimInput.value.key,
@@ -1023,6 +1242,42 @@ function onPointerDown(event) {
 
   const rawLocal = localFromEvent(event)
   const local = getBoxSnapLocal(rawLocal)
+
+  if (app.state.currentTool === 'dimensions') {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (event.button !== 0) {
+      return
+    }
+
+    const canvasRect = canvasRef.value.getBoundingClientRect()
+    const screenX = event.clientX - canvasRect.left
+    const screenY = event.clientY - canvasRect.top
+    const dimensionHit = getDimensionHit(
+      app.state.viewport,
+      drawing.getRenderableDimensions(app.state.currentView),
+      screenX,
+      screenY
+    )
+
+    if (dimensionHit) {
+      openDimInput(dimensionHit)
+      draw()
+      return
+    }
+
+    const snapResult = getDimensionSnapResult(rawLocal)
+
+    drawing.startOrContinueDimension(
+      snapResult.point,
+      snapResult.ref,
+      app.state.currentView
+    )
+
+    draw()
+    return
+  }
 
   if (app.state.currentTool === 'box') {
     event.preventDefault()
@@ -1075,7 +1330,14 @@ function onPointerDown(event) {
     app.state.currentView
   )
 
-  const activeDimHit = boxDimHit || wallDimHit || hoverDim.value
+  const dimensionHit = getDimensionHit(
+    app.state.viewport,
+    drawing.getRenderableDimensions(app.state.currentView),
+    screenX,
+    screenY
+  )
+
+  const activeDimHit = dimensionHit || boxDimHit || wallDimHit || hoverDim.value
 
   if (app.state.currentTool !== 'move' && activeDimHit) {
     event.preventDefault()
@@ -1152,6 +1414,7 @@ function onPointerDown(event) {
       drawing.selectPanels(mergeIds(drawing.state.selectedPanelIds, panelHit.panel.id))
     } else {
       drawing.selectPanel(panelHit.panel.id)
+      drawing.selectDimensions([])
       box.clearSelection()
     }
 
@@ -1192,6 +1455,16 @@ function onPointerMove(event) {
       panOriginal.x + event.clientX - panStart.x,
       panOriginal.y + event.clientY - panStart.y
     )
+    draw()
+    return
+  }
+
+  if (app.state.currentTool === 'dimensions') {
+    const snapResult = getDimensionSnapResult(rawLocal)
+
+    drawing.previewDimension(snapResult.point, snapResult.ref)
+    drawing.setHover(null)
+    hoverDim.value = null
     draw()
     return
   }
@@ -1268,6 +1541,7 @@ function onPointerUp(event) {
     const selectedIds = getSelectedIdsByDragRect(selectRect)
 
     drawing.selectPanels(selectedIds.panelIds)
+    drawing.selectDimensions(selectedIds.dimensionIds)
     box.selectBoxes(selectedIds.boxIds)
 
     resetSelectDrag()
@@ -1328,11 +1602,13 @@ function onWheel(event) {
 function deleteCurrentSelection() {
   const hasPanels = Array.isArray(drawing.state.selectedPanelIds) && drawing.state.selectedPanelIds.length > 0
   const hasBoxes = Array.isArray(box.state.selectedBoxIds) && box.state.selectedBoxIds.length > 0
+  const hasDimensions = Array.isArray(drawing.state.selectedDimensionIds) && drawing.state.selectedDimensionIds.length > 0
 
-  if (!hasPanels && !hasBoxes) return false
+  if (!hasPanels && !hasBoxes && !hasDimensions) return false
 
   drawing.pushHistorySnapshot('Xóa selection')
   drawing.deleteSelectedPanels()
+  drawing.deleteSelectedDimensions()
   box.deleteSelectedBoxes()
   drawing.rebuildZones()
   draw()
@@ -1451,6 +1727,16 @@ function onKeyDown(event) {
     }
   }
 
+  if (key === 'd' || key === 'D') {
+    event.preventDefault()
+    app.setTool('dimensions')
+    drawing.resetDimensionTool()
+    refreshDimensionSnapFromMouse()
+    app.setStatus('Dimensions: chọn điểm đầu')
+    draw()
+    return
+  }
+
   if (key === 'm' || key === 'M') {
     event.preventDefault()
     moveCopyMode.value = false
@@ -1474,6 +1760,8 @@ watch(() => [
   drawing.state.panels.length,
   drawing.state.zones.length,
   drawing.state.selectedPanelId,
+  drawing.state.selectedDimensionIds.length,
+  drawing.state.dimensions.length,
   drawing.state.panelInputBuffer,
   app.state.mini3DVisible
 ], draw)
@@ -1513,6 +1801,14 @@ watch(() => app.state.currentTool, (tool) => {
     return
   }
 
+  if (tool === 'dimensions') {
+    drawing.resetDimensionTool()
+    refreshDimensionSnapFromMouse()
+    app.setStatus('Dimensions: chọn điểm đầu')
+    draw()
+    return
+  }
+
   if (tool === 'panel') {
     app.setStatus('Vẽ Tấm: chọn cạnh Zone')
     draw()
@@ -1532,6 +1828,10 @@ onBeforeUnmount(() => {
 
 .mn-cursor-move {
   cursor: none;
+}
+
+.mn-cursor-dimensions {
+  cursor: url("data:image/svg+xml,%3Csvg width='34' height='34' viewBox='0 0 34 34' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 2 L3 23 L8 18 L12 29 L16 27 L12 16 L20 16 Z' fill='white' stroke='%23111111' stroke-width='1.4' stroke-linejoin='round'/%3E%3Cline x1='17' y1='24' x2='31' y2='24' stroke='%230077CC' stroke-width='2'/%3E%3Cline x1='17' y1='20' x2='17' y2='28' stroke='%230077CC' stroke-width='2'/%3E%3Cline x1='31' y1='20' x2='31' y2='28' stroke='%230077CC' stroke-width='2'/%3E%3Ctext x='24' y='19' font-size='8' text-anchor='middle' fill='%230077CC'%3EDIM%3C/text%3E%3C/svg%3E") 3 2, crosshair;
 }
 .mn-cursor-box {
   cursor: url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 2 L4 22 L9 17 L13 27 L17 25 L13 15 L20 15 Z' fill='white' stroke='%23111111' stroke-width='1.4' stroke-linejoin='round'/%3E%3Crect x='13' y='21' width='14' height='8' rx='1.5' fill='%23dbefff' stroke='%230077CC' stroke-width='1.5'/%3E%3C/svg%3E") 4 2, crosshair;

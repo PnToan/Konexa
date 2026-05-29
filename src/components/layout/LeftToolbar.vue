@@ -26,7 +26,8 @@ const tools = [
   { id: 'select', label: 'Chọn', icon: '/icons/toolbar/select.svg' },
   { id: 'box', label: 'Box', icon: '/icons/toolbar/rect.svg' },
   { id: 'panel', label: 'Vẽ Tấm', icon: '/icons/toolbar/panel.svg' },
-  { id: 'move', label: 'Di chuyển', icon: '/icons/toolbar/move.svg' }
+  { id: 'move', label: 'Di chuyển', icon: '/icons/toolbar/move.svg' },
+  { id: 'dimensions', label: 'Dimensions', icon: '/icons/toolbar/measure.svg' }
 ]
 
 //=================
