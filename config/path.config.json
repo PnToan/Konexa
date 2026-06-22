@@ -1,8 +1,0 @@
-{
-  "core": "core/",
-  "apps": "apps/",
-  "ui": "ui/",
-  "scripts": "scripts/",
-  "icons": "icons/",
-  "data": "data/"
-}
