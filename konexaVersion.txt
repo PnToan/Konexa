@@ -1,0 +1,2 @@
+version=1.2.0
+rbz_url=https://raw.githubusercontent.com/PnToan/MN_plastic/main/TNP_Sketch.rbz
