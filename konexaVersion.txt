@@ -1,2 +1,2 @@
-version=1.0.5
+version=1.0.6
 rbz_url=https://raw.githubusercontent.com/PnToan/Konexa/main/konexa_layout.rbz
